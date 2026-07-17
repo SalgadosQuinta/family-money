@@ -152,5 +152,5 @@ create index if not exists fam_expenses_spent_idx on public.fam_expenses (spent_
 -- ============================================================
 insert into public.fam_members (user_id, role)
 select id, 'admin' from public.profiles
-where lower(email) = lower('REPLACE_WITH_YOUR_EMAIL')
+where lower(email) = lower('rodney@mullway.com')
 on conflict (user_id) do update set role = 'admin';
