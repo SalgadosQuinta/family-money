@@ -73,6 +73,8 @@ function mockFetch(url, opts){
     if(method === 'POST'){ DB.expenses.unshift(Object.assign({id:'e'+(DB.expenses.length+1)}, JSON.parse(opts.body))); return j(null,201); }
     if(method === 'DELETE'){ const id=/id=eq\.([^&]+)/.exec(url)[1]; DB.expenses = DB.expenses.filter(x=>x.id!==id); return j(null,204); }
   }
+  if(url.includes('/rest/v1/fam_income')) return j([]);
+  if(url.includes('/rest/v1/fam_planner_items')) return j([]);
   if(url.includes('frankfurter')) return j({base:'USD', rates:{GBP:0.8, EUR:0.9, ZAR:18.0}});
   if(url.includes('/storage/v1/object/sign/')) return j({signedURL:'/object/sign/receipts/x?token=abc'});
   if(url.includes('/storage/v1/object/receipts/')) return j({Key:'x'}, 200);
@@ -212,6 +214,91 @@ const wait = ms => new Promise(r=>setTimeout(r, ms));
     const d = dom.window.document;
     assert(d.getElementById('signin-view').style.display === 'none', 'sign-in hidden with stored session');
     assert(d.getElementById('bills-list').innerHTML.includes('Electricity'), 'data loads on boot with stored session');
+  }
+
+
+  console.log('--- Planner: week helpers ---');
+  {
+    const dom = makeDom(); await wait(50);
+    const A = dom.window.App;
+    assert(A.fridayOf('2023-04-03') === '2023-04-07', 'Mon maps to that week Friday');
+    assert(A.fridayOf('2023-04-07') === '2023-04-07', 'Friday maps to itself');
+    assert(A.fridayOf('2023-04-08') === '2023-04-14', 'Saturday rolls to next Friday');
+    const apr = A.weeksOfMonth('2023-04');
+    assert(JSON.stringify(apr) === JSON.stringify(['2023-04-07','2023-04-14','2023-04-21','2023-04-28']), 'April 2023 has the 4 sheet Fridays');
+    const jun = A.weeksOfMonth('2023-06');
+    assert(jun.length === 5 && jun[4] === '2023-06-30', 'June 2023 has 5 Fridays ending 30 Jun');
+    assert(A.shiftMonth('2023-01',-1) === '2022-12', 'shiftMonth crosses year boundary');
+    const t = A.weekTotals('2023-04-07',
+      [{week_date:'2023-04-07', amount:1800, currency:'GBP'}],
+      [{week_date:'2023-04-07', amount:1000, currency:'GBP'}],
+      []);
+    assert(t.rem.GBP === 800, 'remaining = income - outgoings (sheet: 1800-1000=800)');
+  }
+
+  console.log('--- Planner: render + move + paid tick ---');
+  {
+    DB.income = [{id:'i1', person:'Rodney', amount:1800, currency:'GBP', week_date:null}];
+    DB.planner = [{id:'pl1', title:'Farm', amount:1000, currency:'GBP', week_date:null, paid:false}];
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){
+        w.fetch = function(url, opts){
+          opts = opts || {};
+          if(url.includes('/rest/v1/fam_income')){
+            if((opts.method||'GET')==='GET') return Promise.resolve({ok:true,status:200,text:()=>Promise.resolve(JSON.stringify(DB.income)),json:()=>Promise.resolve(DB.income)});
+            if(opts.method==='PATCH'){ const id=/id=eq\.([^&]+)/.exec(url)[1]; Object.assign(DB.income.find(x=>x.id===id), JSON.parse(opts.body)); return Promise.resolve({ok:true,status:204,text:()=>Promise.resolve('')}); }
+          }
+          if(url.includes('/rest/v1/fam_planner_items')){
+            if((opts.method||'GET')==='GET') return Promise.resolve({ok:true,status:200,text:()=>Promise.resolve(JSON.stringify(DB.planner)),json:()=>Promise.resolve(DB.planner)});
+            if(opts.method==='PATCH'){ const id=/id=eq\.([^&]+)/.exec(url)[1]; Object.assign(DB.planner.find(x=>x.id===id), JSON.parse(opts.body)); return Promise.resolve({ok:true,status:204,text:()=>Promise.resolve('')}); }
+            if(opts.method==='POST'){ DB.planner.push(Object.assign({id:'pl'+(DB.planner.length+1)}, JSON.parse(opts.body))); return Promise.resolve({ok:true,status:201,text:()=>Promise.resolve('')}); }
+          }
+          return mockFetch(url, opts);
+        };
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}}));
+      }});
+    await wait(150);
+    const d = dom.window.document, A = dom.window.App;
+    const weeks = A.weeksOfMonth(A.state.plMonth);
+    DB.income[0].week_date = weeks[0]; DB.planner[0].week_date = weeks[0];
+    await A.boot(); await wait(100);
+    d.querySelector('#tabs button[data-view="planner"]').click();
+    const boardHTML = d.getElementById('pl-board').innerHTML;
+    assert(boardHTML.includes('Rodney') && boardHTML.includes('Farm'), 'planner renders income and item cards');
+    assert(d.querySelectorAll('#pl-board .wcol').length === weeks.length, 'one column per Friday of month');
+    assert(boardHTML.includes('Remaining'), 'weekly remaining shown');
+
+    // move item to week 2 (simulates the drop handler)
+    await A.moveCard('item','pl1', weeks[1]); A.renderPlanner();
+    const cols = d.querySelectorAll('#pl-board .wcol');
+    assert(!cols[0].innerHTML.includes('Farm') && cols[1].innerHTML.includes('Farm'), 'drag-move relocates card to target week');
+
+    // paid tick
+    d.querySelector('button[data-act="ptick"][data-id="pl1"]').click(); await wait(60);
+    assert(DB.planner[0].paid === true && DB.planner[0].paid_by === UID, 'paid tick persists who marked it');
+    assert(d.querySelector('.card.paid') !== null, 'paid card styled as paid');
+
+    // month nav
+    const before = d.getElementById('pl-month').textContent;
+    d.getElementById('pl-next').click(); await wait(80);
+    assert(d.getElementById('pl-month').textContent !== before, 'month navigation changes board');
+  }
+
+  console.log('--- AI capture mapping ---');
+  {
+    const dom = makeDom(); await wait(50);
+    const A = dom.window.App;
+    A.state.plMonth = '2023-04';
+    const props = A.mapCaptureResponse({finance_payments:[
+      {title:'Rent', amount:'1548', currency:'GBP', due_date:'2023-05-26'},
+      {name:'Salary', amount:1800, direction:'income', date:'2023-04-06'},
+      {title:'Broken', amount:'abc'},
+      {description:'Fuel', value:120, currency:'XXX'}
+    ]});
+    assert(props.length === 3, 'invalid amounts filtered out');
+    assert(props[0].week === '2023-05-26' && props[0].kind === 'item', 'due date mapped to Friday week, default outgoing');
+    assert(props[1].kind === 'income', 'income direction detected');
+    assert(props[2].currency === 'GBP', 'unknown currency falls back to GBP');
   }
 
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');

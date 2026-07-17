@@ -102,6 +102,41 @@ textarea{resize:vertical;min-height:60px}
 img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin-top:8px}
 .spin{display:inline-block;width:14px;height:14px;border:2px solid var(--muted);border-top-color:var(--brass);
   border-radius:50%;animation:sp .8s linear infinite;vertical-align:-2px}
+
+/* Planner (Kanban) */
+.board{display:flex;gap:12px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:8px}
+.wcol{flex:0 0 240px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+  padding:10px;display:flex;flex-direction:column;min-height:280px}
+.wcol.dragover{border-color:var(--brass);background:var(--panel2)}
+.wcol .whead{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--brass);border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:8px;
+  display:flex;justify-content:space-between;align-items:center}
+.wsec{font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);
+  margin:8px 0 4px}
+.card{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:7px 9px;margin-bottom:6px;
+  cursor:grab;font-size:13px}
+.card:active{cursor:grabbing}
+.card.dragging{opacity:.4}
+.card .crow{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.card .amount{font-size:12.5px}
+.card.income{border-left:3px solid var(--green)}
+.card.bill-card{border-left:3px solid var(--brass-dim)}
+.card.paid{opacity:.55}
+.card.paid .ctitle{text-decoration:line-through}
+.card .cactions{display:flex;gap:8px;margin-top:3px}
+.paidtick{appearance:none;border:1px solid var(--line);background:none;border-radius:5px;color:var(--muted);
+  font-size:10px;padding:1px 6px;cursor:pointer;font-family:var(--mono);letter-spacing:.06em}
+.paidtick.on{border-color:var(--green);color:var(--green)}
+.wfoot{margin-top:auto;border-top:1px solid var(--line);padding-top:8px;font-size:12px}
+.wfoot .frow{display:flex;justify-content:space-between;gap:8px}
+.wfoot .pos{color:var(--green)} .wfoot .neg{color:var(--red)}
+.monthnav{display:flex;align-items:center;gap:10px}
+.monthnav .m{font-weight:650;min-width:130px;text-align:center}
+.addmini{appearance:none;border:1px dashed var(--line);background:none;color:var(--muted);border-radius:8px;
+  padding:5px;width:100%;cursor:pointer;font-size:12px;margin-top:2px}
+.addmini:hover{color:var(--brass);border-color:var(--brass-dim)}
+.prop{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px}
+.prop .inline3{display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px;margin-top:6px}
 @keyframes sp{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.spin{animation:none}}
 </style>
@@ -137,6 +172,7 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
     <button data-view="dashboard" class="active">Dashboard</button>
     <button data-view="bills">Bills</button>
     <button data-view="expenses">Expenses</button>
+    <button data-view="planner">Planner</button>
   </nav>
 </header>
 
@@ -207,6 +243,25 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
     <div class="panel">
       <h2>Recent expenses (60 days)</h2>
       <div id="expenses-list"><div class="empty">Loading…</div></div>
+    </div>
+  </section>
+
+  <!-- PLANNER -->
+  <section id="view-planner" style="display:none">
+    <div class="row" style="margin-bottom:12px;flex-wrap:wrap;gap:10px">
+      <div class="monthnav">
+        <button class="iconbtn" id="pl-prev" aria-label="Previous month">◀</button>
+        <span class="m" id="pl-month"></span>
+        <button class="iconbtn" id="pl-next" aria-label="Next month">▶</button>
+      </div>
+      <span class="small muted">Weeks end on the Friday shown. Drag cards between weeks.</span>
+    </div>
+    <div class="board" id="pl-board"><div class="empty">Loading…</div></div>
+    <div class="panel" style="margin-top:14px">
+      <h2>AI capture</h2>
+      <p class="small muted" style="margin-top:0">Paste a bill, email or statement. Claude will propose items to add to the planner — you review before anything is saved.</p>
+      <textarea id="cap-text" placeholder="Paste text here…" style="min-height:90px"></textarea>
+      <div class="btnrow"><button class="btn primary" id="cap-btn">Analyse</button></div>
     </div>
   </section>
 </main>
@@ -291,6 +346,69 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
   </div>
 </div>
 
+<!-- Planner item modal -->
+<div class="modal-wrap" id="pitem-modal">
+  <div class="modal">
+    <h3 id="pim-title">Add item</h3>
+    <label class="f" for="pim-name">Title</label>
+    <input id="pim-name" placeholder="e.g. Farm">
+    <div class="inline2">
+      <div><label class="f" for="pim-amount">Amount</label>
+        <input id="pim-amount" type="number" inputmode="decimal" step="0.01" min="0"></div>
+      <div><label class="f" for="pim-currency">Currency</label>
+        <select id="pim-currency"></select></div>
+    </div>
+    <label class="f" for="pim-week">Week (Friday)</label>
+    <select id="pim-week"></select>
+    <label class="f" for="pim-note">Note</label>
+    <input id="pim-note" placeholder="Optional">
+    <div id="pim-err" class="small" style="color:var(--red);margin-top:8px;display:none"></div>
+    <div class="btnrow">
+      <button class="btn danger" id="pim-del" style="margin-right:auto;display:none">Delete</button>
+      <button class="btn ghost" data-close="pitem-modal">Cancel</button>
+      <button class="btn primary" id="pim-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Income modal -->
+<div class="modal-wrap" id="inc-modal">
+  <div class="modal">
+    <h3 id="im-title">Add income</h3>
+    <label class="f" for="im-person">Person / source</label>
+    <input id="im-person" placeholder="e.g. Rodney" list="person-list">
+    <datalist id="person-list"></datalist>
+    <div class="inline2">
+      <div><label class="f" for="im-amount">Amount</label>
+        <input id="im-amount" type="number" inputmode="decimal" step="0.01" min="0"></div>
+      <div><label class="f" for="im-currency">Currency</label>
+        <select id="im-currency"></select></div>
+    </div>
+    <label class="f" for="im-week">Week (Friday)</label>
+    <select id="im-week"></select>
+    <div id="im-err" class="small" style="color:var(--red);margin-top:8px;display:none"></div>
+    <div class="btnrow">
+      <button class="btn danger" id="im-del" style="margin-right:auto;display:none">Delete</button>
+      <button class="btn ghost" data-close="inc-modal">Cancel</button>
+      <button class="btn primary" id="im-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- AI capture review modal -->
+<div class="modal-wrap" id="cap-modal">
+  <div class="modal" style="max-width:560px">
+    <h3>Review proposals</h3>
+    <p class="small muted" style="margin-top:0">Untick anything you don't want. Adjust type, week and amounts before adding.</p>
+    <div id="cap-props"></div>
+    <div id="cap-err" class="small" style="color:var(--red);margin-top:8px;display:none"></div>
+    <div class="btnrow">
+      <button class="btn ghost" data-close="cap-modal">Cancel</button>
+      <button class="btn primary" id="cap-add">Add selected</button>
+    </div>
+  </div>
+</div>
+
 <!-- Confirm modal -->
 <div class="modal-wrap" id="confirm-modal">
   <div class="modal">
@@ -332,7 +450,13 @@ var App = (function(){
     rates: null,         // frankfurter USD rates {base:'USD', rates:{GBP:..}}
     view: 'dashboard',
     editingBill: null,
-    payingBill: null
+    payingBill: null,
+    plMonth: null,        // 'YYYY-MM' shown on the planner board
+    income: [],           // fam_income rows for visible range
+    planItems: [],        // fam_planner_items rows for visible range
+    editingItem: null,
+    editingIncome: null,
+    capProposals: []
   };
 
   /* ---------------- utilities ---------------- */
@@ -381,6 +505,46 @@ var App = (function(){
       d.setDate(Math.min(day, last));
     }
     return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  }
+
+  // ---- Planner week helpers (weeks run Saturday..Friday, anchored on the Friday) ----
+  function isoOf(d){
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  }
+  function fridayOf(dateISO){
+    var d = new Date(dateISO + 'T00:00:00');
+    var offset = (5 - d.getDay() + 7) % 7; // Sun=0..Sat=6; Sat rolls to NEXT Friday
+    d.setDate(d.getDate() + offset);
+    return isoOf(d);
+  }
+  function weeksOfMonth(ym){ // 'YYYY-MM' -> array of Friday ISO dates in that month
+    var y = +ym.slice(0,4), m = +ym.slice(5,7);
+    var out = [], d = new Date(y, m-1, 1);
+    while(d.getMonth() === m-1){
+      if(d.getDay() === 5) out.push(isoOf(d));
+      d.setDate(d.getDate() + 1);
+    }
+    return out;
+  }
+  function shiftMonth(ym, delta){
+    var y = +ym.slice(0,4), m = +ym.slice(5,7) - 1 + delta;
+    var d = new Date(y, m, 1);
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+  }
+  function monthLabel(ym){
+    var d = new Date(+ym.slice(0,4), +ym.slice(5,7)-1, 1);
+    return d.toLocaleDateString('en-GB', {month:'long', year:'numeric'});
+  }
+  // Weekly maths (also used by tests): items+bills out, income in, per currency
+  function weekTotals(weekISO, income, items, bills){
+    var out = {}, inc = {};
+    items.forEach(function(it){ if(it.week_date === weekISO) out[it.currency] = (out[it.currency]||0) + Number(it.amount); });
+    (bills||[]).forEach(function(b){ if(!b.archived && fridayOf(b.due_date) === weekISO) out[b.currency] = (out[b.currency]||0) + Number(b.amount); });
+    income.forEach(function(i){ if(i.week_date === weekISO) inc[i.currency] = (inc[i.currency]||0) + Number(i.amount); });
+    var rem = {};
+    Object.keys(inc).forEach(function(c){ rem[c] = inc[c] - (out[c]||0); });
+    Object.keys(out).forEach(function(c){ if(!(c in rem)) rem[c] = -out[c]; });
+    return {out:out, inc:inc, rem:rem};
   }
 
   function memberName(id){
@@ -490,6 +654,21 @@ var App = (function(){
     return apiJSON('/rest/v1/fam_expenses?select=*&spent_at=gte.' + from + '&order=spent_at.desc')
       .then(function(rows){ state.expenses = rows || []; });
   }
+  function loadPlanner(){
+    // Load a generous window around the visible month (±1 month) so drags across edges stay loaded
+    var ym = state.plMonth || todayISO().slice(0,7);
+    var from = shiftMonth(ym,-1) + '-01', to = shiftMonth(ym,2) + '-01';
+    return Promise.all([
+      apiJSON('/rest/v1/fam_income?select=*&week_date=gte.' + from + '&week_date=lt.' + to + '&order=week_date.asc'),
+      apiJSON('/rest/v1/fam_planner_items?select=*&week_date=gte.' + from + '&week_date=lt.' + to + '&order=created_at.asc')
+    ]).then(function(res){
+      state.income = res[0] || [];
+      state.planItems = res[1] || [];
+    }).catch(function(){
+      // Planner tables not migrated yet (or offline) — degrade gracefully
+      state.income = []; state.planItems = [];
+    });
+  }
   function loadRates(){
     try{
       var cached = JSON.parse(localStorage.getItem('fm_rates') || 'null');
@@ -535,7 +714,7 @@ var App = (function(){
 
   function setView(v){
     state.view = v;
-    ['dashboard','bills','expenses'].forEach(function(name){
+    ['dashboard','bills','expenses','planner'].forEach(function(name){
       $('view-' + name).style.display = (name === v && state.isMember) ? '' : 'none';
     });
     document.querySelectorAll('#tabs button').forEach(function(b){
@@ -670,8 +849,246 @@ var App = (function(){
     }).join('') : '<div class="empty">No payments recorded this month yet.</div>';
   }
 
+  /* ---------------- planner ---------------- */
+  function fmtShort(iso){
+    var d = new Date(iso + 'T00:00:00');
+    return d.toLocaleDateString('en-GB', {day:'2-digit', month:'short'});
+  }
+  function moneyList(obj, cls){
+    return Object.keys(obj).map(function(c){
+      var v = obj[c];
+      var k = cls ? (v >= 0 ? 'pos' : 'neg') : '';
+      return '<span class="' + k + '">' + esc(fmtMoney(Math.abs(v), c)) + (cls && v < 0 ? ' over' : '') + '</span>';
+    }).join(' · ') || '<span class="muted">—</span>';
+  }
+
+  function renderPlanner(){
+    if(!state.plMonth) state.plMonth = todayISO().slice(0,7);
+    $('pl-month').textContent = monthLabel(state.plMonth);
+    var weeks = weeksOfMonth(state.plMonth);
+    var board = $('pl-board');
+    board.innerHTML = weeks.map(function(w){
+      var t = weekTotals(w, state.income, state.planItems, state.bills);
+      var incCards = state.income.filter(function(i){ return i.week_date === w; }).map(function(i){
+        return '<div class="card income" draggable="true" data-kind="income" data-id="' + esc(i.id) + '">' +
+          '<div class="crow"><span class="ctitle">' + esc(i.person) + '</span>' +
+          '<span class="amount">' + esc(fmtMoney(i.amount, i.currency)) + '</span></div></div>';
+      }).join('');
+      var billCards = state.bills.filter(function(b){ return !b.archived && fridayOf(b.due_date) === w; }).map(function(b){
+        return '<div class="card bill-card" draggable="true" data-kind="bill" data-id="' + esc(b.id) + '">' +
+          '<div class="crow"><span class="ctitle">' + esc(b.name) + '</span>' +
+          '<span class="amount">' + esc(fmtMoney(b.amount, b.currency)) + '</span></div>' +
+          '<div class="cactions"><span class="small muted">bill · due ' + esc(fmtShort(b.due_date)) + '</span></div></div>';
+      }).join('');
+      var itemCards = state.planItems.filter(function(i){ return i.week_date === w; }).map(function(i){
+        return '<div class="card' + (i.paid ? ' paid' : '') + '" draggable="true" data-kind="item" data-id="' + esc(i.id) + '">' +
+          '<div class="crow"><span class="ctitle">' + esc(i.title) + '</span>' +
+          '<span class="amount">' + esc(fmtMoney(i.amount, i.currency)) + '</span></div>' +
+          '<div class="cactions"><button class="paidtick' + (i.paid ? ' on' : '') + '" data-act="ptick" data-id="' + esc(i.id) + '">' +
+          (i.paid ? 'Paid' : 'Mark paid') + '</button></div></div>';
+      }).join('');
+      return '<div class="wcol" data-week="' + esc(w) + '">' +
+        '<div class="whead"><span>' + esc(fmtShort(w)) + '</span><span class="muted small">wk</span></div>' +
+        '<div class="wsec">Money in</div>' + (incCards || '') +
+        '<button class="addmini" data-act="addinc" data-week="' + esc(w) + '">+ income</button>' +
+        '<div class="wsec">Out</div>' + (billCards + itemCards || '') +
+        '<button class="addmini" data-act="additem" data-week="' + esc(w) + '">+ item</button>' +
+        '<div class="wfoot">' +
+          '<div class="frow"><span class="muted">In</span><span>' + moneyList(t.inc) + '</span></div>' +
+          '<div class="frow"><span class="muted">Out</span><span>' + moneyList(t.out) + '</span></div>' +
+          '<div class="frow"><span class="muted">Remaining</span><span>' + moneyList(t.rem, true) + '</span></div>' +
+        '</div></div>';
+    }).join('');
+    bindBoardDnD();
+  }
+
+  // Move a card to a different week (returns the PATCH promise)
+  function moveCard(kind, id, weekISO){
+    if(kind === 'item'){
+      var it = state.planItems.find(function(x){ return x.id === id; });
+      if(it) it.week_date = weekISO;
+      return apiJSON('/rest/v1/fam_planner_items?id=eq.' + id, {method:'PATCH', body:JSON.stringify({week_date:weekISO})});
+    }
+    if(kind === 'income'){
+      var inc = state.income.find(function(x){ return x.id === id; });
+      if(inc) inc.week_date = weekISO;
+      return apiJSON('/rest/v1/fam_income?id=eq.' + id, {method:'PATCH', body:JSON.stringify({week_date:weekISO})});
+    }
+    if(kind === 'bill'){
+      var b = state.bills.find(function(x){ return x.id === id; });
+      if(b) b.due_date = weekISO; // dropping a bill sets its due date to the target week's Friday
+      return apiJSON('/rest/v1/fam_bills?id=eq.' + id, {method:'PATCH', body:JSON.stringify({due_date:weekISO, updated_at:new Date().toISOString()})});
+    }
+    return Promise.resolve();
+  }
+
+  var dragData = null;
+  function bindBoardDnD(){
+    var board = $('pl-board');
+    board.querySelectorAll('.card').forEach(function(c){
+      c.addEventListener('dragstart', function(e){
+        dragData = {kind:c.getAttribute('data-kind'), id:c.getAttribute('data-id')};
+        c.classList.add('dragging');
+        if(e.dataTransfer){ e.dataTransfer.effectAllowed = 'move'; try{ e.dataTransfer.setData('text/plain', dragData.id); }catch(err){} }
+      });
+      c.addEventListener('dragend', function(){ c.classList.remove('dragging'); });
+    });
+    board.querySelectorAll('.wcol').forEach(function(col){
+      col.addEventListener('dragover', function(e){ e.preventDefault(); col.classList.add('dragover'); });
+      col.addEventListener('dragleave', function(){ col.classList.remove('dragover'); });
+      col.addEventListener('drop', function(e){
+        e.preventDefault(); col.classList.remove('dragover');
+        if(!dragData) return;
+        var week = col.getAttribute('data-week'), d = dragData; dragData = null;
+        moveCard(d.kind, d.id, week)
+          .then(function(){ renderPlanner(); renderBills(); renderDashboard(); })
+          .catch(function(err){ toast(err.message); });
+      });
+    });
+  }
+
+  function fillWeekSelect(sel, selected){
+    var el = $(sel); el.innerHTML = '';
+    var weeks = weeksOfMonth(shiftMonth(state.plMonth,-1))
+      .concat(weeksOfMonth(state.plMonth))
+      .concat(weeksOfMonth(shiftMonth(state.plMonth,1)));
+    weeks.forEach(function(w){
+      var o = document.createElement('option'); o.value = w; o.textContent = fmtShort(w) + ' (' + w.slice(0,7) + ')';
+      el.appendChild(o);
+    });
+    el.value = selected && weeks.indexOf(selected) >= 0 ? selected : (weeksOfMonth(state.plMonth)[0] || weeks[0]);
+  }
+
+  function openItemModal(item, week){
+    state.editingItem = item || null;
+    $('pim-title').textContent = item ? 'Edit item' : 'Add item';
+    $('pim-name').value = item ? item.title : '';
+    $('pim-amount').value = item ? item.amount : '';
+    $('pim-currency').value = item ? item.currency : 'GBP';
+    fillWeekSelect('pim-week', item ? item.week_date : week);
+    $('pim-note').value = item ? (item.note || '') : '';
+    $('pim-del').style.display = item ? '' : 'none';
+    $('pim-err').style.display = 'none';
+    modalOpen('pitem-modal');
+  }
+  function saveItem(){
+    var title = $('pim-name').value.trim(), amount = parseFloat($('pim-amount').value);
+    var errEl = $('pim-err');
+    if(!title || !(amount >= 0)){ errEl.textContent = 'Title and a valid amount are required.'; errEl.style.display=''; return; }
+    var body = {title:title, amount:amount, currency:$('pim-currency').value,
+      week_date:$('pim-week').value, note:($('pim-note').value.trim() || null)};
+    var p = state.editingItem
+      ? apiJSON('/rest/v1/fam_planner_items?id=eq.' + state.editingItem.id, {method:'PATCH', body:JSON.stringify(body)})
+      : apiJSON('/rest/v1/fam_planner_items', {method:'POST', headers:{'Prefer':'return=minimal'}, body:JSON.stringify(body)});
+    p.then(function(){ modalClose('pitem-modal'); return loadPlanner().then(renderPlanner); })
+     .catch(function(e){ errEl.textContent = e.message; errEl.style.display=''; });
+  }
+
+  function openIncomeModal(inc, week){
+    state.editingIncome = inc || null;
+    $('im-title').textContent = inc ? 'Edit income' : 'Add income';
+    $('im-person').value = inc ? inc.person : '';
+    $('im-amount').value = inc ? inc.amount : '';
+    $('im-currency').value = inc ? inc.currency : 'GBP';
+    fillWeekSelect('im-week', inc ? inc.week_date : week);
+    var dl = $('person-list'); dl.innerHTML = '';
+    var seen = {};
+    state.income.forEach(function(i){ if(!seen[i.person]){ seen[i.person]=1; var o=document.createElement('option'); o.value=i.person; dl.appendChild(o);} });
+    $('im-del').style.display = inc ? '' : 'none';
+    $('im-err').style.display = 'none';
+    modalOpen('inc-modal');
+  }
+  function saveIncome(){
+    var person = $('im-person').value.trim(), amount = parseFloat($('im-amount').value);
+    var errEl = $('im-err');
+    if(!person || !(amount >= 0)){ errEl.textContent = 'Person and a valid amount are required.'; errEl.style.display=''; return; }
+    var body = {person:person, amount:amount, currency:$('im-currency').value, week_date:$('im-week').value};
+    var p = state.editingIncome
+      ? apiJSON('/rest/v1/fam_income?id=eq.' + state.editingIncome.id, {method:'PATCH', body:JSON.stringify(body)})
+      : apiJSON('/rest/v1/fam_income', {method:'POST', headers:{'Prefer':'return=minimal'}, body:JSON.stringify(body)});
+    p.then(function(){ modalClose('inc-modal'); return loadPlanner().then(renderPlanner); })
+     .catch(function(e){ errEl.textContent = e.message; errEl.style.display=''; });
+  }
+
+  /* ---------------- AI capture ---------------- */
+  // Defensive mapping of smart-capture output to planner proposals
+  function mapCaptureResponse(j){
+    var raw = (j && (j.finance_payments || j.payments || j.items)) || [];
+    if(!Array.isArray(raw)) raw = [];
+    return raw.map(function(r){
+      var amt = parseFloat(r.amount != null ? r.amount : r.value);
+      var date = r.due_date || r.date || todayISO();
+      var ccy = (r.currency || 'GBP').toUpperCase();
+      if(CURRENCIES.indexOf(ccy) < 0) ccy = 'GBP';
+      var dir = (r.direction || r.type || '').toLowerCase();
+      return {
+        title: r.title || r.name || r.description || 'Item',
+        amount: isFinite(amt) ? Math.abs(amt) : 0,
+        currency: ccy,
+        week: fridayOf(String(date).slice(0,10)),
+        kind: (dir.indexOf('in') === 0 || dir === 'income' || dir === 'credit') ? 'income' : 'item',
+        selected: true
+      };
+    }).filter(function(p){ return p.amount > 0; });
+  }
+
+  function runCapture(){
+    var text = $('cap-text').value.trim();
+    if(!text){ toast('Paste something to analyse first.'); return; }
+    var btn = $('cap-btn'); btn.disabled = true; btn.textContent = 'Analysing…';
+    apiJSON('/functions/v1/smart-capture', {method:'POST', body: JSON.stringify({text:text, context:'family-money-planner'})})
+      .then(function(j){
+        state.capProposals = mapCaptureResponse(j);
+        if(!state.capProposals.length){ toast('Nothing recognisable found in that text.'); return; }
+        renderCaptureReview();
+        modalOpen('cap-modal');
+      })
+      .catch(function(e){ toast('Capture failed: ' + e.message); })
+      .then(function(){ btn.disabled = false; btn.textContent = 'Analyse'; });
+  }
+
+  function renderCaptureReview(){
+    var weeks = weeksOfMonth(shiftMonth(state.plMonth,-1)).concat(weeksOfMonth(state.plMonth)).concat(weeksOfMonth(shiftMonth(state.plMonth,1)));
+    $('cap-props').innerHTML = state.capProposals.map(function(p, i){
+      var wopts = weeks.map(function(w){
+        return '<option value="' + esc(w) + '"' + (w === p.week ? ' selected' : '') + '>' + esc(fmtShort(w)) + '</option>';
+      }).join('');
+      return '<div class="prop">' +
+        '<label style="display:flex;gap:8px;align-items:center;font-size:13.5px">' +
+          '<input type="checkbox" style="width:auto" data-cap="sel" data-i="' + i + '"' + (p.selected ? ' checked' : '') + '>' +
+          '<strong>' + esc(p.title) + '</strong></label>' +
+        '<div class="inline3">' +
+          '<select data-cap="kind" data-i="' + i + '"><option value="item"' + (p.kind==='item'?' selected':'') + '>Outgoing</option>' +
+            '<option value="income"' + (p.kind==='income'?' selected':'') + '>Income</option></select>' +
+          '<input type="number" step="0.01" value="' + esc(p.amount) + '" data-cap="amount" data-i="' + i + '">' +
+          '<select data-cap="week" data-i="' + i + '">' + wopts + '</select>' +
+        '</div></div>';
+    }).join('');
+  }
+
+  function addCaptured(){
+    var sel = state.capProposals.filter(function(p){ return p.selected; });
+    if(!sel.length){ modalClose('cap-modal'); return; }
+    var btn = $('cap-add'); btn.disabled = true;
+    var posts = sel.map(function(p){
+      if(p.kind === 'income'){
+        return apiJSON('/rest/v1/fam_income', {method:'POST', headers:{'Prefer':'return=minimal'},
+          body: JSON.stringify({person:p.title, amount:p.amount, currency:p.currency, week_date:p.week})});
+      }
+      return apiJSON('/rest/v1/fam_planner_items', {method:'POST', headers:{'Prefer':'return=minimal'},
+        body: JSON.stringify({title:p.title, amount:p.amount, currency:p.currency, week_date:p.week})});
+    });
+    Promise.all(posts).then(function(){
+      modalClose('cap-modal'); $('cap-text').value = '';
+      toast(sel.length + ' item' + (sel.length>1?'s':'') + ' added.');
+      return loadPlanner().then(renderPlanner);
+    }).catch(function(e){
+      $('cap-err').textContent = e.message; $('cap-err').style.display='';
+    }).then(function(){ btn.disabled = false; });
+  }
+
   function renderAll(){
-    renderBills(); renderPayments(); renderExpenses(); renderDashboard();
+    renderBills(); renderPayments(); renderExpenses(); renderDashboard(); renderPlanner();
   }
 
   /* ---------------- modals ---------------- */
@@ -680,7 +1097,7 @@ var App = (function(){
   function modalClose(id){ $(id).classList.remove('open'); if(openModal === id) openModal = null; }
 
   function fillCurrencySelects(){
-    ['bm-currency','ex-currency'].forEach(function(id){
+    ['bm-currency','ex-currency','pim-currency','im-currency'].forEach(function(id){
       var el = $(id); if(!el || el.options.length) return;
       CURRENCIES.forEach(function(c){
         var o = document.createElement('option'); o.value = c; o.textContent = c; el.appendChild(o);
@@ -858,6 +1275,59 @@ var App = (function(){
     document.addEventListener('keydown', function(e){
       if(e.key === 'Escape' && openModal) modalClose(openModal);
     });
+    $('pl-prev').addEventListener('click', function(){ state.plMonth = shiftMonth(state.plMonth,-1); loadPlanner().then(renderPlanner); });
+    $('pl-next').addEventListener('click', function(){ state.plMonth = shiftMonth(state.plMonth,1); loadPlanner().then(renderPlanner); });
+    $('pim-save').addEventListener('click', saveItem);
+    $('im-save').addEventListener('click', saveIncome);
+    $('cap-btn').addEventListener('click', runCapture);
+    $('cap-add').addEventListener('click', addCaptured);
+    $('pim-del').addEventListener('click', function(){
+      var it = state.editingItem; if(!it) return;
+      apiJSON('/rest/v1/fam_planner_items?id=eq.' + it.id, {method:'DELETE'})
+        .then(function(){ modalClose('pitem-modal'); return loadPlanner().then(renderPlanner); })
+        .catch(function(e){ toast(e.message); });
+    });
+    $('im-del').addEventListener('click', function(){
+      var inc = state.editingIncome; if(!inc) return;
+      apiJSON('/rest/v1/fam_income?id=eq.' + inc.id, {method:'DELETE'})
+        .then(function(){ modalClose('inc-modal'); return loadPlanner().then(renderPlanner); })
+        .catch(function(e){ toast(e.message); });
+    });
+    $('cap-props') && $('cap-props').addEventListener('change', function(e){
+      var t = e.target, i = +t.getAttribute('data-i'), k = t.getAttribute('data-cap');
+      if(!state.capProposals[i]) return;
+      if(k === 'sel') state.capProposals[i].selected = t.checked;
+      else if(k === 'amount') state.capProposals[i].amount = parseFloat(t.value) || 0;
+      else if(k === 'kind') state.capProposals[i].kind = t.value;
+      else if(k === 'week') state.capProposals[i].week = t.value;
+    });
+    // Planner board: add buttons, paid tick, open edit on card double click
+    $('pl-board').addEventListener('click', function(e){
+      var b = e.target.closest('[data-act]');
+      if(b){
+        var act = b.getAttribute('data-act');
+        if(act === 'additem'){ openItemModal(null, b.getAttribute('data-week')); return; }
+        if(act === 'addinc'){ openIncomeModal(null, b.getAttribute('data-week')); return; }
+        if(act === 'ptick'){
+          var id = b.getAttribute('data-id');
+          var it = state.planItems.find(function(x){ return x.id === id; });
+          if(!it) return;
+          var patch = it.paid ? {paid:false, paid_by:null, paid_at:null}
+            : {paid:true, paid_by:state.session.user.id, paid_at:new Date().toISOString()};
+          apiJSON('/rest/v1/fam_planner_items?id=eq.' + id, {method:'PATCH', body:JSON.stringify(patch)})
+            .then(function(){ Object.assign(it, patch); renderPlanner(); })
+            .catch(function(err){ toast(err.message); });
+          return;
+        }
+      }
+    });
+    $('pl-board').addEventListener('dblclick', function(e){
+      var c = e.target.closest('.card'); if(!c) return;
+      var kind = c.getAttribute('data-kind'), id = c.getAttribute('data-id');
+      if(kind === 'item') openItemModal(state.planItems.find(function(x){ return x.id === id; }));
+      else if(kind === 'income') openIncomeModal(state.income.find(function(x){ return x.id === id; }));
+      else if(kind === 'bill') openBillModal(state.bills.find(function(x){ return x.id === id; }));
+    });
     // Delegated actions in lists
     document.querySelector('main').addEventListener('click', function(e){
       var b = e.target.closest('button[data-act]'); if(!b) return;
@@ -891,7 +1361,7 @@ var App = (function(){
         showApp(); // re-check membership banner
         if(!state.isMember){ setView('dashboard'); return; }
         setView(state.view);
-        return Promise.all([loadBills(), loadPayments(), loadExpenses()]).then(renderAll);
+        return Promise.all([loadBills(), loadPayments(), loadExpenses(), loadPlanner()]).then(renderAll);
       })
       .catch(function(e){ toast(e.message); });
   }
@@ -912,6 +1382,8 @@ var App = (function(){
     approxUSD:approxUSD, signIn:signIn, signOut:signOut, api:api, apiJSON:apiJSON,
     loadSession:loadSession, saveSession:saveSession,
     state:state, init:init, boot:boot, todayISO:todayISO,
+    fridayOf:fridayOf, weeksOfMonth:weeksOfMonth, weekTotals:weekTotals, shiftMonth:shiftMonth,
+    moveCard:moveCard, mapCaptureResponse:mapCaptureResponse, renderPlanner:renderPlanner,
     VAPID_PUBLIC:VAPID_PUBLIC
   };
 })();
