@@ -1,0 +1,923 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Family Money</title>
+<meta name="theme-color" content="#0f1216">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<style>
+:root{
+  --bg:#0f1216; --panel:#171b21; --panel2:#1d222a; --line:#262c35;
+  --ink:#e8e6e1; --muted:#9aa3ad; --brass:#c9a227; --brass-dim:#8f7a2a;
+  --red:#e05252; --green:#4caf7d; --radius:10px;
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+[data-theme="light"]{
+  --bg:#f2f0ea; --panel:#ffffff; --panel2:#f7f5ef; --line:#ddd8cc;
+  --ink:#1c1f24; --muted:#6b7280; --brass:#8f7a2a; --brass-dim:#c9a227;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:15px;line-height:1.45;
+  padding-bottom:env(safe-area-inset-bottom)}
+a{color:var(--brass);text-decoration:none}
+.eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--brass)}
+.muted{color:var(--muted)}
+.small{font-size:12.5px}
+
+/* Header + tabs (top) */
+header{position:sticky;top:0;z-index:20;background:var(--bg);border-bottom:1px solid var(--line);
+  padding:10px 14px 0;padding-top:calc(10px + env(safe-area-inset-top))}
+.hrow{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.brand{display:flex;align-items:baseline;gap:8px}
+.brand h1{font-size:16px;margin:0;font-weight:650}
+nav.tabs{display:flex;gap:2px;margin-top:8px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+nav.tabs button{appearance:none;border:0;background:none;color:var(--muted);cursor:pointer;
+  font-family:var(--mono);font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;
+  padding:9px 12px;border-bottom:2px solid transparent;white-space:nowrap}
+nav.tabs button.active{color:var(--brass);border-bottom-color:var(--brass)}
+.iconbtn{appearance:none;border:1px solid var(--line);background:var(--panel);color:var(--muted);
+  border-radius:8px;padding:5px 9px;cursor:pointer;font-size:13px}
+
+main{max-width:860px;margin:0 auto;padding:14px}
+
+/* Panels & cards */
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px;margin-bottom:14px}
+.panel h2{margin:0 0 10px;font-size:14px;font-weight:650}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:640px){.grid2{grid-template-columns:1fr}}
+.row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.item{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;
+  padding:10px 0;border-top:1px solid var(--line)}
+.item:first-of-type{border-top:0}
+.amount{font-family:var(--mono);font-size:14px;white-space:nowrap}
+.amount.big{font-size:20px;color:var(--brass)}
+.overdue{color:var(--red)}
+.badge{display:inline-block;font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+  border:1px solid var(--line);border-radius:6px;padding:1.5px 6px;color:var(--muted);margin-left:6px}
+.badge.red{border-color:var(--red);color:var(--red)}
+.badge.brass{border-color:var(--brass-dim);color:var(--brass)}
+
+/* Forms */
+label.f{display:block;margin:10px 0 4px;font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--muted)}
+input,select,textarea{width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:8px;
+  color:var(--ink);padding:9px 10px;font-size:15px;font-family:var(--font)}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--brass-dim)}
+textarea{resize:vertical;min-height:60px}
+.btn{appearance:none;border:1px solid var(--brass-dim);background:none;color:var(--brass);border-radius:8px;
+  padding:9px 16px;font-size:14px;cursor:pointer;font-weight:600}
+.btn.primary{background:var(--brass);border-color:var(--brass);color:#14120a}
+.btn.ghost{border-color:var(--line);color:var(--muted)}
+.btn.danger{border-color:var(--red);color:var(--red)}
+.btn:disabled{opacity:.5;cursor:default}
+.btnrow{display:flex;gap:10px;justify-content:flex-end;margin-top:16px;flex-wrap:wrap}
+.inline2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+
+/* Modal — never closes on outside click */
+.modal-wrap{position:fixed;inset:0;background:rgba(6,8,10,.72);display:none;z-index:50;
+  align-items:flex-start;justify-content:center;overflow-y:auto;padding:24px 12px}
+.modal-wrap.open{display:flex}
+.modal{background:var(--panel);border:1px solid var(--line);border-radius:12px;width:100%;max-width:480px;
+  padding:18px;margin:auto 0}
+.modal h3{margin:0 0 4px;font-size:16px}
+
+.list-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+.linkbtn{appearance:none;border:0;background:none;color:var(--brass);cursor:pointer;font-size:12.5px;padding:0}
+.linkbtn.red{color:var(--red)}
+.empty{color:var(--muted);padding:16px 0;text-align:center;font-size:13.5px}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--panel);
+  border:1px solid var(--brass-dim);color:var(--ink);border-radius:10px;padding:10px 16px;font-size:13.5px;
+  z-index:80;display:none;max-width:90vw}
+.toast.show{display:block}
+.signin{max-width:380px;margin:8vh auto 0;padding:0 16px}
+.signin .panel{padding:22px}
+.statgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+.stat{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px}
+.stat .v{font-family:var(--mono);font-size:17px;margin-top:2px}
+img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin-top:8px}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid var(--muted);border-top-color:var(--brass);
+  border-radius:50%;animation:sp .8s linear infinite;vertical-align:-2px}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.spin{animation:none}}
+</style>
+</head>
+<body>
+
+<div id="signin-view" class="signin" style="display:none">
+  <div style="text-align:center;margin-bottom:18px">
+    <div class="eyebrow">Forgiatus</div>
+    <h1 style="margin:4px 0 0;font-size:22px">Family Money</h1>
+  </div>
+  <div class="panel">
+    <label class="f" for="si-email">Email</label>
+    <input id="si-email" type="email" autocomplete="username" inputmode="email">
+    <label class="f" for="si-pass">Password</label>
+    <input id="si-pass" type="password" autocomplete="current-password">
+    <div id="si-err" class="small" style="color:var(--red);margin-top:8px;display:none"></div>
+    <div class="btnrow"><button class="btn primary" id="si-btn" style="width:100%">Sign in</button></div>
+  </div>
+  <p class="small muted" style="text-align:center">Accounts are created by the family admin.</p>
+</div>
+
+<div id="app-view" style="display:none">
+<header>
+  <div class="hrow">
+    <div class="brand"><span class="eyebrow">Forgiatus</span><h1>Family Money</h1></div>
+    <div style="display:flex;gap:6px">
+      <button class="iconbtn" id="theme-btn" title="Toggle theme">◐</button>
+      <button class="iconbtn" id="signout-btn" title="Sign out">Sign out</button>
+    </div>
+  </div>
+  <nav class="tabs" id="tabs">
+    <button data-view="dashboard" class="active">Dashboard</button>
+    <button data-view="bills">Bills</button>
+    <button data-view="expenses">Expenses</button>
+  </nav>
+</header>
+
+<main>
+  <div id="notmember" class="panel" style="display:none">
+    <h2>Not yet a family member</h2>
+    <p class="small muted">Your account is signed in but has not been added to the family space yet. Ask the admin to add you.</p>
+  </div>
+
+  <!-- DASHBOARD -->
+  <section id="view-dashboard" style="display:none">
+    <div class="panel">
+      <div class="row"><h2>Due this week &amp; overdue</h2><span class="eyebrow" id="d-today"></span></div>
+      <div id="d-due"></div>
+    </div>
+    <div class="grid2">
+      <div class="panel">
+        <h2>Committed — next 30 days</h2>
+        <div class="statgrid" id="d-committed"></div>
+        <div class="small muted" id="d-usd-note" style="margin-top:8px"></div>
+      </div>
+      <div class="panel">
+        <h2>Spend this month</h2>
+        <div id="d-spend"></div>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Paid this month — by member</h2>
+      <div id="d-members"></div>
+    </div>
+  </section>
+
+  <!-- BILLS -->
+  <section id="view-bills" style="display:none">
+    <div class="row" style="margin-bottom:12px">
+      <span class="eyebrow">Household bills &amp; commitments</span>
+      <button class="btn primary" id="bill-add-btn">Add bill</button>
+    </div>
+    <div class="panel"><div id="bills-list"><div class="empty">Loading…</div></div></div>
+    <div class="panel">
+      <h2>Recent payments</h2>
+      <div id="payments-list"><div class="empty">Loading…</div></div>
+    </div>
+  </section>
+
+  <!-- EXPENSES -->
+  <section id="view-expenses" style="display:none">
+    <div class="panel">
+      <h2>Quick expense</h2>
+      <div class="inline2">
+        <div><label class="f" for="ex-amount">Amount</label>
+          <input id="ex-amount" type="number" inputmode="decimal" step="0.01" min="0"></div>
+        <div><label class="f" for="ex-currency">Currency</label>
+          <select id="ex-currency"></select></div>
+      </div>
+      <div class="inline2">
+        <div><label class="f" for="ex-category">Category</label>
+          <input id="ex-category" list="cat-list" placeholder="General"></div>
+        <div><label class="f" for="ex-date">Date</label>
+          <input id="ex-date" type="date"></div>
+      </div>
+      <label class="f" for="ex-note">Note</label>
+      <input id="ex-note" placeholder="Optional">
+      <label class="f" for="ex-receipt">Receipt photo</label>
+      <input id="ex-receipt" type="file" accept="image/*">
+      <div class="btnrow"><button class="btn primary" id="ex-save-btn">Add expense</button></div>
+    </div>
+    <div class="panel">
+      <h2>Recent expenses (60 days)</h2>
+      <div id="expenses-list"><div class="empty">Loading…</div></div>
+    </div>
+  </section>
+</main>
+</div>
+
+<datalist id="cat-list">
+  <option>Rent</option><option>Utilities</option><option>Groceries</option><option>School</option>
+  <option>Medical</option><option>Transport</option><option>Insurance</option><option>Internet</option>
+  <option>Subscriptions</option><option>General</option>
+</datalist>
+
+<!-- Bill add/edit modal -->
+<div class="modal-wrap" id="bill-modal">
+  <div class="modal">
+    <h3 id="bm-title">Add bill</h3>
+    <p class="small muted" style="margin-top:0">Shared with the whole family.</p>
+    <label class="f" for="bm-name">Name</label>
+    <input id="bm-name" placeholder="e.g. Electricity">
+    <div class="inline2">
+      <div><label class="f" for="bm-amount">Amount</label>
+        <input id="bm-amount" type="number" inputmode="decimal" step="0.01" min="0"></div>
+      <div><label class="f" for="bm-currency">Currency</label>
+        <select id="bm-currency"></select></div>
+    </div>
+    <div class="inline2">
+      <div><label class="f" for="bm-due">Due date</label>
+        <input id="bm-due" type="date"></div>
+      <div><label class="f" for="bm-recurrence">Recurrence</label>
+        <select id="bm-recurrence">
+          <option value="none">One-off</option><option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option><option value="quarterly">Quarterly</option>
+          <option value="annually">Annually</option>
+        </select></div>
+    </div>
+    <div class="inline2">
+      <div><label class="f" for="bm-category">Category</label>
+        <input id="bm-category" list="cat-list" placeholder="General"></div>
+      <div><label class="f" for="bm-responsible">Responsible</label>
+        <select id="bm-responsible"></select></div>
+    </div>
+    <label class="f" for="bm-notes">Notes</label>
+    <textarea id="bm-notes"></textarea>
+    <label class="f" for="bm-receipt">Invoice / receipt photo</label>
+    <input id="bm-receipt" type="file" accept="image/*">
+    <div id="bm-receipt-current" class="small muted"></div>
+    <div id="bm-err" class="small" style="color:var(--red);margin-top:8px;display:none"></div>
+    <div class="btnrow">
+      <button class="btn ghost" data-close="bill-modal">Cancel</button>
+      <button class="btn primary" id="bm-save">Save bill</button>
+    </div>
+  </div>
+</div>
+
+<!-- Mark paid modal -->
+<div class="modal-wrap" id="paid-modal">
+  <div class="modal">
+    <h3>Mark paid</h3>
+    <p class="small muted" id="pm-billname" style="margin-top:0"></p>
+    <div class="inline2">
+      <div><label class="f" for="pm-amount">Amount paid</label>
+        <input id="pm-amount" type="number" inputmode="decimal" step="0.01" min="0"></div>
+      <div><label class="f">Currency</label>
+        <input id="pm-currency" disabled></div>
+    </div>
+    <label class="f" for="pm-note">Note</label>
+    <input id="pm-note" placeholder="Optional">
+    <div class="small muted" id="pm-rollnote" style="margin-top:8px"></div>
+    <div id="pm-err" class="small" style="color:var(--red);margin-top:8px;display:none"></div>
+    <div class="btnrow">
+      <button class="btn ghost" data-close="paid-modal">Cancel</button>
+      <button class="btn primary" id="pm-save">Confirm paid</button>
+    </div>
+  </div>
+</div>
+
+<!-- Receipt viewer -->
+<div class="modal-wrap" id="receipt-modal">
+  <div class="modal">
+    <h3>Receipt</h3>
+    <div id="rm-body"><span class="spin"></span></div>
+    <div class="btnrow"><button class="btn ghost" data-close="receipt-modal">Close</button></div>
+  </div>
+</div>
+
+<!-- Confirm modal -->
+<div class="modal-wrap" id="confirm-modal">
+  <div class="modal">
+    <h3 id="cm-title">Are you sure?</h3>
+    <p class="small muted" id="cm-text"></p>
+    <div class="btnrow">
+      <button class="btn ghost" data-close="confirm-modal">Cancel</button>
+      <button class="btn danger" id="cm-yes">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+/* ============================================================
+   Family Money — single-file app (no frameworks, no build step)
+   Part of the Forgiatus platform. GB English throughout.
+   ============================================================ */
+var App = (function(){
+
+  var SUPABASE_URL = 'https://ejlsbydsqjbxfwmvlapm.supabase.co';
+  var ANON_KEY = 'sb_publishable_hB7hrrTkLMNh6FrH_FTUSg_cxIlM9Nt';
+  var VAPID_PUBLIC = 'BLVIKKCjHYJollBuxb00jUN2eVIAeRbjmRGcNoDSQKawpJum1g6Srq0ZZGPC6YynIMtGGlSGN5ok4v-82ttnJnw';
+  var SESSION_KEY = 'fm_session';
+  var CURRENCIES = ['USD','GBP','ZWG','EUR','ZAR'];
+  var CCY_SYMBOL = {USD:'$',GBP:'£',ZWG:'ZWG ',EUR:'€',ZAR:'R'};
+
+  var state = {
+    session: null,       // {access_token, refresh_token, user:{id,email}}
+    members: [],         // [{user_id, role}]
+    profiles: {},        // id -> {display_name, email}
+    isMember: false,
+    isAdmin: false,
+    bills: [],
+    payments: [],
+    expenses: [],
+    rates: null,         // frankfurter USD rates {base:'USD', rates:{GBP:..}}
+    view: 'dashboard',
+    editingBill: null,
+    payingBill: null
+  };
+
+  /* ---------------- utilities ---------------- */
+  function esc(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
+  function $(id){ return document.getElementById(id); }
+  function toast(msg){
+    var t = $('toast'); if(!t) return;
+    t.textContent = msg; t.classList.add('show');
+    clearTimeout(toast._t); toast._t = setTimeout(function(){ t.classList.remove('show'); }, 3200);
+  }
+  function todayISO(){
+    var d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  }
+  function fmtMoney(amount, ccy){
+    var n = Number(amount) || 0;
+    return (CCY_SYMBOL[ccy] || (ccy + ' ')) + n.toLocaleString('en-GB', {minimumFractionDigits:2, maximumFractionDigits:2});
+  }
+  function fmtDate(iso){
+    if(!iso) return '';
+    var d = new Date(iso + (iso.length === 10 ? 'T00:00:00' : ''));
+    return d.toLocaleDateString('en-GB', {day:'numeric', month:'short', year:'numeric'});
+  }
+  function daysUntil(dateISO){
+    var t = new Date(todayISO() + 'T00:00:00');
+    var d = new Date(dateISO + 'T00:00:00');
+    return Math.round((d - t) / 86400000);
+  }
+  function isOverdue(bill){ return !bill.archived && daysUntil(bill.due_date) < 0; }
+
+  // Roll a due date forward one recurrence period. Monthly/quarterly/annually
+  // are clamped to the last day of the target month (e.g. 31 Jan + monthly -> 28 Feb).
+  function nextDueDate(dueISO, recurrence){
+    var d = new Date(dueISO + 'T00:00:00');
+    if(recurrence === 'weekly'){ d.setDate(d.getDate() + 7); }
+    else {
+      var months = recurrence === 'monthly' ? 1 : recurrence === 'quarterly' ? 3 : recurrence === 'annually' ? 12 : 0;
+      if(!months) return dueISO;
+      var day = d.getDate();
+      d.setDate(1); d.setMonth(d.getMonth() + months);
+      var last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+      d.setDate(Math.min(day, last));
+    }
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  }
+
+  function memberName(id){
+    var p = state.profiles[id];
+    if(!p) return 'Unknown';
+    return p.display_name || (p.email ? p.email.split('@')[0] : 'Unknown');
+  }
+
+  function approxUSD(amount, ccy){
+    if(ccy === 'USD') return Number(amount) || 0;
+    if(!state.rates || !state.rates.rates || !state.rates.rates[ccy]) return null; // ZWG not on frankfurter
+    return (Number(amount) || 0) / state.rates.rates[ccy];
+  }
+
+  /* ---------------- session + API ---------------- */
+  function loadSession(){
+    try{ state.session = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); }
+    catch(e){ state.session = null; }
+    return state.session;
+  }
+  function saveSession(s){ state.session = s; localStorage.setItem(SESSION_KEY, JSON.stringify(s)); }
+  function clearSession(){ state.session = null; localStorage.removeItem(SESSION_KEY); }
+
+  function refreshToken(){
+    if(!state.session || !state.session.refresh_token) return Promise.reject(new Error('No session'));
+    return fetch(SUPABASE_URL + '/auth/v1/token?grant_type=refresh_token', {
+      method:'POST',
+      headers:{'apikey':ANON_KEY,'Content-Type':'application/json'},
+      body: JSON.stringify({refresh_token: state.session.refresh_token})
+    }).then(function(r){
+      if(!r.ok) throw new Error('Refresh failed');
+      return r.json();
+    }).then(function(j){
+      saveSession({access_token:j.access_token, refresh_token:j.refresh_token, user:j.user});
+      return state.session;
+    });
+  }
+
+  // fetch wrapper with refresh-on-401 (one retry)
+  function api(path, opts, _retried){
+    opts = opts || {};
+    var headers = Object.assign({
+      'apikey': ANON_KEY,
+      'Authorization': 'Bearer ' + (state.session ? state.session.access_token : ANON_KEY),
+      'Content-Type': 'application/json'
+    }, opts.headers || {});
+    return fetch(SUPABASE_URL + path, Object.assign({}, opts, {headers:headers}))
+      .then(function(r){
+        if(r.status === 401 && !_retried && state.session){
+          return refreshToken().then(function(){ return api(path, opts, true); })
+            .catch(function(){ signOut(); throw new Error('Session expired'); });
+        }
+        return r;
+      });
+  }
+  function apiJSON(path, opts){
+    return api(path, opts).then(function(r){
+      if(!r.ok) return r.text().then(function(t){ throw new Error('API ' + r.status + ': ' + t.slice(0,200)); });
+      if(r.status === 204) return null;
+      return r.text().then(function(t){ return t ? JSON.parse(t) : null; });
+    });
+  }
+
+  function signIn(email, password){
+    return fetch(SUPABASE_URL + '/auth/v1/token?grant_type=password', {
+      method:'POST',
+      headers:{'apikey':ANON_KEY,'Content-Type':'application/json'},
+      body: JSON.stringify({email:email, password:password})
+    }).then(function(r){ return r.json().then(function(j){ return {ok:r.ok, j:j}; }); })
+      .then(function(res){
+        if(!res.ok) throw new Error(res.j.error_description || res.j.msg || 'Sign in failed');
+        saveSession({access_token:res.j.access_token, refresh_token:res.j.refresh_token, user:res.j.user});
+        return state.session;
+      });
+  }
+  function signOut(){
+    clearSession();
+    if(typeof document !== 'undefined'){ showSignIn(); }
+  }
+
+  /* ---------------- data loading ---------------- */
+  function loadMembers(){
+    return apiJSON('/rest/v1/fam_members?select=user_id,role').then(function(rows){
+      state.members = rows || [];
+      var uid = state.session && state.session.user ? state.session.user.id : null;
+      var me = state.members.find(function(m){ return m.user_id === uid; });
+      state.isMember = !!me;
+      state.isAdmin = !!(me && me.role === 'admin');
+      if(state.members.length){
+        var ids = state.members.map(function(m){ return '"' + m.user_id + '"'; }).join(',');
+        return apiJSON('/rest/v1/profiles?select=id,display_name,email&id=in.(' + ids + ')').then(function(ps){
+          (ps || []).forEach(function(p){ state.profiles[p.id] = p; });
+        });
+      }
+    }).catch(function(){ state.isMember = false; });
+  }
+  function loadBills(){
+    return apiJSON('/rest/v1/fam_bills?select=*&archived=eq.false&order=due_date.asc')
+      .then(function(rows){ state.bills = rows || []; });
+  }
+  function loadPayments(){
+    return apiJSON('/rest/v1/fam_bill_payments?select=*&order=paid_at.desc&limit=120')
+      .then(function(rows){ state.payments = rows || []; });
+  }
+  function loadExpenses(){
+    var from = new Date(Date.now() - 60*86400000).toISOString().slice(0,10);
+    return apiJSON('/rest/v1/fam_expenses?select=*&spent_at=gte.' + from + '&order=spent_at.desc')
+      .then(function(rows){ state.expenses = rows || []; });
+  }
+  function loadRates(){
+    try{
+      var cached = JSON.parse(localStorage.getItem('fm_rates') || 'null');
+      if(cached && cached.day === todayISO()){ state.rates = cached.data; return Promise.resolve(); }
+    }catch(e){}
+    return fetch('https://api.frankfurter.app/latest?base=USD')
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(j){
+        if(j){ state.rates = j; localStorage.setItem('fm_rates', JSON.stringify({day:todayISO(), data:j})); }
+      }).catch(function(){ /* offline — indicative USD simply omitted */ });
+  }
+
+  /* ---------------- receipts (storage) ---------------- */
+  function uploadReceipt(file){
+    var uid = state.session.user.id;
+    var safe = file.name.replace(/[^A-Za-z0-9._-]/g, '_').slice(-60);
+    var path = uid + '/fam-' + Date.now() + '-' + safe;
+    return api('/storage/v1/object/receipts/' + path, {
+      method:'POST',
+      headers:{'Content-Type': file.type || 'application/octet-stream'},
+      body: file
+    }).then(function(r){
+      if(!r.ok) throw new Error('Upload failed (' + r.status + ')');
+      return path;
+    });
+  }
+  function signedReceiptURL(path){
+    return apiJSON('/storage/v1/object/sign/receipts/' + path, {
+      method:'POST', body: JSON.stringify({expiresIn: 600})
+    }).then(function(j){ return SUPABASE_URL + '/storage/v1' + j.signedURL; });
+  }
+
+  /* ---------------- rendering ---------------- */
+  function showSignIn(){
+    $('signin-view').style.display = '';
+    $('app-view').style.display = 'none';
+  }
+  function showApp(){
+    $('signin-view').style.display = 'none';
+    $('app-view').style.display = '';
+    $('notmember').style.display = state.isMember ? 'none' : '';
+  }
+
+  function setView(v){
+    state.view = v;
+    ['dashboard','bills','expenses'].forEach(function(name){
+      $('view-' + name).style.display = (name === v && state.isMember) ? '' : 'none';
+    });
+    document.querySelectorAll('#tabs button').forEach(function(b){
+      b.classList.toggle('active', b.getAttribute('data-view') === v);
+    });
+  }
+
+  function billRow(b){
+    var du = daysUntil(b.due_date);
+    var when = du < 0 ? (Math.abs(du) + 'd overdue') : du === 0 ? 'Due today' : ('Due in ' + du + 'd');
+    var od = isOverdue(b);
+    var usd = approxUSD(b.amount, b.currency);
+    var html = '<div class="item" data-id="' + esc(b.id) + '">' +
+      '<div><div><strong>' + esc(b.name) + '</strong>' +
+        (b.recurrence !== 'none' ? '<span class="badge brass">' + esc(b.recurrence) + '</span>' : '') +
+        (od ? '<span class="badge red">Overdue</span>' : '') + '</div>' +
+      '<div class="small muted">' + esc(fmtDate(b.due_date)) + ' · ' +
+        '<span class="' + (od ? 'overdue' : '') + '">' + esc(when) + '</span> · ' +
+        esc(b.category || 'General') +
+        (b.responsible ? ' · ' + esc(memberName(b.responsible)) : '') + '</div>' +
+      '<div class="list-actions">' +
+        '<button class="linkbtn" data-act="paid" data-id="' + esc(b.id) + '">Mark paid</button>' +
+        '<button class="linkbtn" data-act="edit" data-id="' + esc(b.id) + '">Edit</button>' +
+        (b.receipt_path ? '<button class="linkbtn" data-act="receipt" data-path="' + esc(b.receipt_path) + '">Receipt</button>' : '') +
+        (state.isAdmin ? '<button class="linkbtn red" data-act="del" data-id="' + esc(b.id) + '">Delete</button>' : '') +
+      '</div></div>' +
+      '<div style="text-align:right"><div class="amount ' + (od ? 'overdue' : '') + '">' + esc(fmtMoney(b.amount, b.currency)) + '</div>' +
+        (usd !== null && b.currency !== 'USD' ? '<div class="small muted">≈ ' + esc(fmtMoney(usd,'USD')) + '</div>' : '') +
+      '</div></div>';
+    return html;
+  }
+
+  function renderBills(){
+    var el = $('bills-list');
+    if(!state.bills.length){ el.innerHTML = '<div class="empty">No bills yet. Add the first one.</div>'; return; }
+    el.innerHTML = state.bills.map(billRow).join('');
+  }
+
+  function renderPayments(){
+    var el = $('payments-list');
+    var rows = state.payments.slice(0, 25);
+    if(!rows.length){ el.innerHTML = '<div class="empty">Nothing paid yet.</div>'; return; }
+    el.innerHTML = rows.map(function(p){
+      return '<div class="item"><div><div><strong>' + esc(p.bill_name) + '</strong></div>' +
+        '<div class="small muted">' + esc(fmtDate(p.paid_at.slice(0,10))) + ' · paid by ' + esc(memberName(p.paid_by)) +
+        (p.note ? ' · ' + esc(p.note) : '') + '</div></div>' +
+        '<div class="amount">' + esc(fmtMoney(p.amount, p.currency)) + '</div></div>';
+    }).join('');
+  }
+
+  function renderExpenses(){
+    var el = $('expenses-list');
+    if(!state.expenses.length){ el.innerHTML = '<div class="empty">No expenses in the last 60 days.</div>'; return; }
+    var uid = state.session.user.id;
+    el.innerHTML = state.expenses.map(function(x){
+      return '<div class="item"><div><div><strong>' + esc(x.category || 'General') + '</strong></div>' +
+        '<div class="small muted">' + esc(fmtDate(x.spent_at)) + ' · ' + esc(memberName(x.spent_by)) +
+        (x.note ? ' · ' + esc(x.note) : '') + '</div>' +
+        '<div class="list-actions">' +
+          (x.receipt_path ? '<button class="linkbtn" data-act="receipt" data-path="' + esc(x.receipt_path) + '">Receipt</button>' : '') +
+          ((x.spent_by === uid || state.isAdmin) ? '<button class="linkbtn red" data-act="exdel" data-id="' + esc(x.id) + '">Delete</button>' : '') +
+        '</div></div>' +
+        '<div class="amount">' + esc(fmtMoney(x.amount, x.currency)) + '</div></div>';
+    }).join('');
+  }
+
+  function monthKey(iso){ return iso.slice(0,7); }
+
+  function renderDashboard(){
+    $('d-today').textContent = fmtDate(todayISO());
+
+    // Due this week & overdue
+    var soon = state.bills.filter(function(b){ return daysUntil(b.due_date) <= 7; });
+    $('d-due').innerHTML = soon.length ? soon.map(billRow).join('')
+      : '<div class="empty">Nothing due in the next 7 days. </div>';
+
+    // Committed next 30 days per currency (expands recurring bills within window)
+    var perCcy = {}, usdTotal = 0, usdComplete = true;
+    state.bills.forEach(function(b){
+      var due = b.due_date, guard = 0;
+      while(daysUntil(due) <= 30 && guard < 60){
+        perCcy[b.currency] = (perCcy[b.currency] || 0) + Number(b.amount);
+        var u = approxUSD(b.amount, b.currency);
+        if(u === null) usdComplete = false; else usdTotal += u;
+        if(b.recurrence === 'none') break;
+        due = nextDueDate(due, b.recurrence); guard++;
+      }
+    });
+    var ccyKeys = Object.keys(perCcy);
+    $('d-committed').innerHTML = ccyKeys.length ? ccyKeys.map(function(c){
+      return '<div class="stat"><div class="eyebrow">' + esc(c) + '</div><div class="v">' + esc(fmtMoney(perCcy[c], c)) + '</div></div>';
+    }).join('') : '<div class="empty" style="grid-column:1/-1">No commitments in the next 30 days.</div>';
+    $('d-usd-note').textContent = ccyKeys.length
+      ? ('≈ ' + fmtMoney(usdTotal,'USD') + ' total' + (usdComplete ? '' : ' (excludes ZWG — no daily rate)'))
+      : '';
+
+    // Spend this month vs last month (payments + expenses), per currency
+    var thisM = monthKey(todayISO());
+    var lastD = new Date(); lastD.setDate(1); lastD.setMonth(lastD.getMonth()-1);
+    var lastM = lastD.getFullYear() + '-' + String(lastD.getMonth()+1).padStart(2,'0');
+    var spend = {}; // ccy -> {cur,prev}
+    function add(ccy, m, amt){
+      spend[ccy] = spend[ccy] || {cur:0, prev:0};
+      if(m === thisM) spend[ccy].cur += amt; else if(m === lastM) spend[ccy].prev += amt;
+    }
+    state.payments.forEach(function(p){ add(p.currency, monthKey(p.paid_at), Number(p.amount)); });
+    state.expenses.forEach(function(x){ add(x.currency, monthKey(x.spent_at), Number(x.amount)); });
+    var sk = Object.keys(spend).filter(function(c){ return spend[c].cur || spend[c].prev; });
+    $('d-spend').innerHTML = sk.length ? sk.map(function(c){
+      return '<div class="item"><div><strong>' + esc(c) + '</strong>' +
+        '<div class="small muted">Last month: ' + esc(fmtMoney(spend[c].prev, c)) + '</div></div>' +
+        '<div class="amount big">' + esc(fmtMoney(spend[c].cur, c)) + '</div></div>';
+    }).join('') : '<div class="empty">No spend recorded yet this month.</div>';
+
+    // Per-member paid this month
+    var byMember = {};
+    state.payments.forEach(function(p){
+      if(monthKey(p.paid_at) !== thisM) return;
+      byMember[p.paid_by] = byMember[p.paid_by] || {};
+      byMember[p.paid_by][p.currency] = (byMember[p.paid_by][p.currency] || 0) + Number(p.amount);
+    });
+    state.expenses.forEach(function(x){
+      if(monthKey(x.spent_at) !== thisM) return;
+      byMember[x.spent_by] = byMember[x.spent_by] || {};
+      byMember[x.spent_by][x.currency] = (byMember[x.spent_by][x.currency] || 0) + Number(x.amount);
+    });
+    var mk = Object.keys(byMember);
+    $('d-members').innerHTML = mk.length ? mk.map(function(id){
+      var parts = Object.keys(byMember[id]).map(function(c){ return fmtMoney(byMember[id][c], c); }).join(' · ');
+      return '<div class="item"><div><strong>' + esc(memberName(id)) + '</strong></div>' +
+        '<div class="amount">' + esc(parts) + '</div></div>';
+    }).join('') : '<div class="empty">No payments recorded this month yet.</div>';
+  }
+
+  function renderAll(){
+    renderBills(); renderPayments(); renderExpenses(); renderDashboard();
+  }
+
+  /* ---------------- modals ---------------- */
+  var openModal = null;
+  function modalOpen(id){ $(id).classList.add('open'); openModal = id; }
+  function modalClose(id){ $(id).classList.remove('open'); if(openModal === id) openModal = null; }
+
+  function fillCurrencySelects(){
+    ['bm-currency','ex-currency'].forEach(function(id){
+      var el = $(id); if(!el || el.options.length) return;
+      CURRENCIES.forEach(function(c){
+        var o = document.createElement('option'); o.value = c; o.textContent = c; el.appendChild(o);
+      });
+    });
+  }
+  function fillResponsibleSelect(){
+    var el = $('bm-responsible'); el.innerHTML = '<option value="">— Anyone —</option>';
+    state.members.forEach(function(m){
+      var o = document.createElement('option'); o.value = m.user_id; o.textContent = memberName(m.user_id);
+      el.appendChild(o);
+    });
+  }
+
+  function openBillModal(bill){
+    state.editingBill = bill || null;
+    fillResponsibleSelect();
+    $('bm-title').textContent = bill ? 'Edit bill' : 'Add bill';
+    $('bm-name').value = bill ? bill.name : '';
+    $('bm-amount').value = bill ? bill.amount : '';
+    $('bm-currency').value = bill ? bill.currency : 'USD';
+    $('bm-due').value = bill ? bill.due_date : todayISO();
+    $('bm-recurrence').value = bill ? bill.recurrence : 'monthly';
+    $('bm-category').value = bill ? (bill.category || '') : '';
+    $('bm-responsible').value = bill && bill.responsible ? bill.responsible : '';
+    $('bm-notes').value = bill ? (bill.notes || '') : '';
+    $('bm-receipt').value = '';
+    $('bm-receipt-current').textContent = bill && bill.receipt_path ? 'A receipt is already attached; choosing a new file replaces it.' : '';
+    $('bm-err').style.display = 'none';
+    modalOpen('bill-modal');
+  }
+
+  function saveBill(){
+    var name = $('bm-name').value.trim();
+    var amount = parseFloat($('bm-amount').value);
+    var due = $('bm-due').value;
+    var errEl = $('bm-err');
+    if(!name || !(amount >= 0) || !due){
+      errEl.textContent = 'Name, a valid amount and a due date are required.';
+      errEl.style.display = ''; return;
+    }
+    var btn = $('bm-save'); btn.disabled = true;
+    var file = $('bm-receipt').files[0];
+    var pre = file ? uploadReceipt(file) : Promise.resolve(state.editingBill ? state.editingBill.receipt_path : null);
+    pre.then(function(receiptPath){
+      var body = {
+        name:name, amount:amount, currency:$('bm-currency').value, due_date:due,
+        recurrence:$('bm-recurrence').value, category:($('bm-category').value.trim() || 'General'),
+        responsible:($('bm-responsible').value || null), notes:($('bm-notes').value.trim() || null),
+        receipt_path: receiptPath || null, updated_at: new Date().toISOString()
+      };
+      if(state.editingBill){
+        return apiJSON('/rest/v1/fam_bills?id=eq.' + state.editingBill.id, {method:'PATCH', body:JSON.stringify(body)});
+      }
+      return apiJSON('/rest/v1/fam_bills', {method:'POST', headers:{'Prefer':'return=minimal'}, body:JSON.stringify(body)});
+    }).then(function(){
+      modalClose('bill-modal'); toast(state.editingBill ? 'Bill updated.' : 'Bill added.');
+      return loadBills().then(renderAll);
+    }).catch(function(e){
+      errEl.textContent = e.message; errEl.style.display = '';
+    }).then(function(){ btn.disabled = false; });
+  }
+
+  function openPaidModal(bill){
+    state.payingBill = bill;
+    $('pm-billname').textContent = bill.name + ' — due ' + fmtDate(bill.due_date);
+    $('pm-amount').value = bill.amount;
+    $('pm-currency').value = bill.currency;
+    $('pm-note').value = '';
+    $('pm-rollnote').textContent = bill.recurrence === 'none'
+      ? 'One-off bill — it will be marked complete.'
+      : 'Recurring — the next due date will be ' + fmtDate(nextDueDate(bill.due_date, bill.recurrence)) + '.';
+    $('pm-err').style.display = 'none';
+    modalOpen('paid-modal');
+  }
+
+  function confirmPaid(){
+    var b = state.payingBill;
+    var amount = parseFloat($('pm-amount').value);
+    var errEl = $('pm-err');
+    if(!(amount >= 0)){ errEl.textContent = 'Enter a valid amount.'; errEl.style.display = ''; return; }
+    var btn = $('pm-save'); btn.disabled = true;
+    var payment = {
+      bill_id:b.id, bill_name:b.name, amount:amount, currency:b.currency,
+      paid_by: state.session.user.id, due_date:b.due_date,
+      note:($('pm-note').value.trim() || null)
+    };
+    apiJSON('/rest/v1/fam_bill_payments', {method:'POST', headers:{'Prefer':'return=minimal'}, body:JSON.stringify(payment)})
+      .then(function(){
+        var patch = b.recurrence === 'none'
+          ? {archived:true, updated_at:new Date().toISOString()}
+          : {due_date: nextDueDate(b.due_date, b.recurrence), updated_at:new Date().toISOString()};
+        return apiJSON('/rest/v1/fam_bills?id=eq.' + b.id, {method:'PATCH', body:JSON.stringify(patch)});
+      })
+      .then(function(){
+        modalClose('paid-modal'); toast('Payment recorded.');
+        return Promise.all([loadBills(), loadPayments()]).then(renderAll);
+      })
+      .catch(function(e){ errEl.textContent = e.message; errEl.style.display = ''; })
+      .then(function(){ btn.disabled = false; });
+  }
+
+  var confirmAction = null;
+  function askConfirm(title, text, fn){
+    $('cm-title').textContent = title; $('cm-text').textContent = text;
+    confirmAction = fn; modalOpen('confirm-modal');
+  }
+
+  function saveExpense(){
+    var amount = parseFloat($('ex-amount').value);
+    if(!(amount >= 0) || !$('ex-amount').value){ toast('Enter a valid amount.'); return; }
+    var btn = $('ex-save-btn'); btn.disabled = true;
+    var file = $('ex-receipt').files[0];
+    var pre = file ? uploadReceipt(file) : Promise.resolve(null);
+    pre.then(function(receiptPath){
+      var body = {
+        amount:amount, currency:$('ex-currency').value,
+        category:($('ex-category').value.trim() || 'General'),
+        spent_by: state.session.user.id,
+        spent_at: $('ex-date').value || todayISO(),
+        note:($('ex-note').value.trim() || null),
+        receipt_path: receiptPath
+      };
+      return apiJSON('/rest/v1/fam_expenses', {method:'POST', headers:{'Prefer':'return=minimal'}, body:JSON.stringify(body)});
+    }).then(function(){
+      $('ex-amount').value=''; $('ex-note').value=''; $('ex-receipt').value='';
+      toast('Expense added.');
+      return loadExpenses().then(renderAll);
+    }).catch(function(e){ toast(e.message); })
+      .then(function(){ btn.disabled = false; });
+  }
+
+  function viewReceipt(path){
+    $('rm-body').innerHTML = '<span class="spin"></span>';
+    modalOpen('receipt-modal');
+    signedReceiptURL(path).then(function(url){
+      $('rm-body').innerHTML = '<img class="receipt" src="' + esc(url) + '" alt="Receipt">';
+    }).catch(function(){
+      $('rm-body').innerHTML = '<div class="empty">Could not load the receipt.</div>';
+    });
+  }
+
+  /* ---------------- events + boot ---------------- */
+  function bindEvents(){
+    $('si-btn').addEventListener('click', function(){
+      var err = $('si-err'); err.style.display = 'none';
+      var btn = $('si-btn'); btn.disabled = true;
+      signIn($('si-email').value.trim(), $('si-pass').value)
+        .then(boot)
+        .catch(function(e){ err.textContent = e.message; err.style.display = ''; })
+        .then(function(){ btn.disabled = false; });
+    });
+    $('si-pass').addEventListener('keydown', function(e){ if(e.key === 'Enter') $('si-btn').click(); });
+    $('signout-btn').addEventListener('click', signOut);
+    $('theme-btn').addEventListener('click', function(){
+      var cur = document.documentElement.getAttribute('data-theme') === 'light' ? '' : 'light';
+      if(cur) document.documentElement.setAttribute('data-theme','light');
+      else document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('fm_theme', cur);
+    });
+    $('tabs').addEventListener('click', function(e){
+      var b = e.target.closest('button[data-view]'); if(b) setView(b.getAttribute('data-view'));
+    });
+    $('bill-add-btn').addEventListener('click', function(){ openBillModal(null); });
+    $('bm-save').addEventListener('click', saveBill);
+    $('pm-save').addEventListener('click', confirmPaid);
+    $('ex-save-btn').addEventListener('click', saveExpense);
+    $('cm-yes').addEventListener('click', function(){
+      modalClose('confirm-modal');
+      if(confirmAction){ var fn = confirmAction; confirmAction = null; fn(); }
+    });
+    document.querySelectorAll('[data-close]').forEach(function(b){
+      b.addEventListener('click', function(){ modalClose(b.getAttribute('data-close')); });
+    });
+    document.addEventListener('keydown', function(e){
+      if(e.key === 'Escape' && openModal) modalClose(openModal);
+    });
+    // Delegated actions in lists
+    document.querySelector('main').addEventListener('click', function(e){
+      var b = e.target.closest('button[data-act]'); if(!b) return;
+      var act = b.getAttribute('data-act'), id = b.getAttribute('data-id');
+      if(act === 'edit'){ openBillModal(state.bills.find(function(x){ return x.id === id; })); }
+      else if(act === 'paid'){ openPaidModal(state.bills.find(function(x){ return x.id === id; })); }
+      else if(act === 'receipt'){ viewReceipt(b.getAttribute('data-path')); }
+      else if(act === 'del'){
+        askConfirm('Delete bill', 'This removes the bill (paid history is kept).', function(){
+          apiJSON('/rest/v1/fam_bills?id=eq.' + id, {method:'DELETE'})
+            .then(function(){ toast('Bill deleted.'); return loadBills().then(renderAll); })
+            .catch(function(err){ toast(err.message); });
+        });
+      }
+      else if(act === 'exdel'){
+        askConfirm('Delete expense', 'This removes the expense entry.', function(){
+          apiJSON('/rest/v1/fam_expenses?id=eq.' + id, {method:'DELETE'})
+            .then(function(){ toast('Expense deleted.'); return loadExpenses().then(renderAll); })
+            .catch(function(err){ toast(err.message); });
+        });
+      }
+    });
+  }
+
+  function boot(){
+    showApp();
+    $('ex-date').value = todayISO();
+    fillCurrencySelects();
+    return Promise.all([loadMembers(), loadRates()])
+      .then(function(){
+        showApp(); // re-check membership banner
+        if(!state.isMember){ setView('dashboard'); return; }
+        setView(state.view);
+        return Promise.all([loadBills(), loadPayments(), loadExpenses()]).then(renderAll);
+      })
+      .catch(function(e){ toast(e.message); });
+  }
+
+  function init(){
+    var theme = localStorage.getItem('fm_theme');
+    if(theme === 'light') document.documentElement.setAttribute('data-theme','light');
+    bindEvents();
+    if(loadSession()){ boot(); } else { showSignIn(); }
+    if('serviceWorker' in navigator){
+      navigator.serviceWorker.register('sw.js').catch(function(){});
+    }
+  }
+
+  // Public surface (also used by tests)
+  return {
+    esc:esc, fmtMoney:fmtMoney, nextDueDate:nextDueDate, daysUntil:daysUntil, isOverdue:isOverdue,
+    approxUSD:approxUSD, signIn:signIn, signOut:signOut, api:api, apiJSON:apiJSON,
+    loadSession:loadSession, saveSession:saveSession,
+    state:state, init:init, boot:boot, todayISO:todayISO,
+    VAPID_PUBLIC:VAPID_PUBLIC
+  };
+})();
+
+if(typeof document !== 'undefined' && document.readyState !== 'loading'){ App.init(); }
+else if(typeof document !== 'undefined'){ document.addEventListener('DOMContentLoaded', App.init); }
+</script>
+</body>
+</html>
