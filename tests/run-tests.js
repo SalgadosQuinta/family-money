@@ -952,6 +952,56 @@ async function cycleSpace(dom, A){
     A.setPlannerMode('weeks');
   }
 
+
+  console.log('--- Space dropdown ---');
+  {
+    DB.settings=[]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[];
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){ w.fetch = mockFetch;
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}})); }});
+    await wait(200);
+    const d = dom.window.document, A = dom.window.App;
+    const sel = d.getElementById('space-select');
+    const opts = ()=>[...sel.options].map(o=>o.value);
+
+    // admin sees all four options
+    assert(JSON.stringify(opts()) === JSON.stringify(['family','private','business','farm']), 'admin dropdown lists all four spaces');
+    assert(sel.value === 'family', 'current space selected');
+
+    // direct jump family -> farm without passing through others
+    await A.goToSpace('farm'); await wait(60);
+    assert(A.currentSpace() === 'farm' && sel.value === 'farm', 'direct selection jumps straight to farm');
+
+    // direct jump farm -> business, no PIN
+    await A.goToSpace('business'); await wait(60);
+    assert(A.currentSpace() === 'business', 'business reachable directly without PIN');
+
+    // private via dropdown still gated; cancel snaps selection back
+    dom.window.localStorage.setItem('fm_pin', await A.hashPin('1234'));
+    sel.value = 'private';
+    sel.dispatchEvent(new dom.window.Event('change', {bubbles:true}));
+    await wait(60);
+    assert(d.getElementById('pin-lock').classList.contains('open'), 'selecting private prompts PIN');
+    d.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape', bubbles:true}));
+    await wait(80);
+    assert(A.currentSpace() !== 'private', 'cancelled PIN does not enter private');
+    assert(sel.value === A.currentSpace(), 'dropdown snaps back to the real space on cancel');
+    // and entering properly works
+    sel.value = 'private';
+    sel.dispatchEvent(new dom.window.Event('change', {bubbles:true}));
+    await wait(60);
+    d.getElementById('pin-input').value='1234'; await A.tryUnlock(); await wait(120);
+    assert(A.currentSpace() === 'private' && sel.value === 'private', 'PIN entry completes the jump to private');
+
+    // member without grants sees only two options
+    A.state.isAdmin = false; A.state.farmGranted = false;
+    A.setSpace('family');
+    assert(JSON.stringify(opts()) === JSON.stringify(['family','private']), 'member dropdown limited to family + private');
+    A.state.farmGranted = true; A.setSpace('family');
+    assert(opts().includes('farm') && !opts().includes('business'), 'granted member gains farm but not business');
+    A.state.isAdmin = true;
+  }
+
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

@@ -205,7 +205,7 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
   <div class="hrow">
     <div class="brand"><img src="icons/crest-96.png" alt="" width="26" height="26" style="align-self:center"><span class="eyebrow">Julius</span><h1>Family Money</h1><span class="badge" id="space-badge" style="display:none;border-color:var(--purple);color:var(--purple)">PRIVATE</span></div>
     <div style="display:flex;gap:6px">
-      <button class="iconbtn" id="space-btn" style="border-color:var(--brass);color:var(--brass);font-weight:600" title="Switch between the shared family space and your private space">Space: Family</button>
+      <select id="space-select" class="iconbtn" style="border-color:var(--brass);color:var(--brass);font-weight:600;background:var(--panel);width:auto;padding:5px 9px" title="Choose a space" aria-label="Choose a space"></select>
       <button class="iconbtn" id="pin-btn" title="Finance PIN">PIN</button>
       <button class="iconbtn" id="theme-btn" title="Toggle theme">◐</button>
       <button class="iconbtn" id="signout-btn" title="Sign out">Sign out</button>
@@ -1128,8 +1128,13 @@ var App = (function(){
     state.space = sp;
     localStorage.setItem('fm_space', sp);
     var col = sp === 'private' ? 'var(--purple)' : sp === 'business' ? 'var(--green)' : sp === 'farm' ? 'var(--farm)' : 'var(--brass)';
-    var sb = $('space-btn');
-    sb.textContent = 'Space: ' + spaceLabel(sp);
+    var sb = $('space-select');
+    var opts = ['family','private'];
+    if(state.isAdmin) opts.push('business');
+    if(state.isAdmin || state.farmGranted) opts.push('farm');
+    sb.innerHTML = opts.map(function(o){
+      return '<option value="' + o + '"' + (o === sp ? ' selected' : '') + '>' + esc(spaceLabel(o)) + '</option>';
+    }).join('');
     sb.style.borderColor = col; sb.style.color = col;
     document.documentElement.setAttribute('data-space', sp);
     var badge = $('space-badge');
@@ -1148,8 +1153,30 @@ var App = (function(){
       .then(renderAll)
       .catch(function(e){ toast(e.message); });
   }
+  // Jump straight to a chosen space (dropdown); private still passes the PIN gate
+  function goToSpace(sp){
+    if(sp === currentSpace()) return Promise.resolve();
+    var allowed = ['family','private'];
+    if(state.isAdmin) allowed.push('business');
+    if(state.isAdmin || state.farmGranted) allowed.push('farm');
+    if(allowed.indexOf(sp) < 0) sp = 'family';
+    if(sp === 'private'){
+      return new Promise(function(resolve){
+        requireSpacePin('private', function(){
+          setSpace('private');
+          if(state.view === 'admin' && !state.isAdmin) setView('dashboard');
+          toast('Your private space — only you can see this.');
+          switchSpaceReload().then(resolve);
+        });
+      });
+    }
+    setSpace(sp);
+    if(state.view === 'admin' && sp === 'family' && !state.isAdmin) setView('dashboard');
+    toast(sp === 'business' ? 'Business space — visible to you alone.' : sp === 'farm' ? 'TRJ Farms — shared with those granted access.' : 'Shared family space.');
+    return switchSpaceReload();
+  }
   function switchSpace(){
-    // Cycle: family -> private -> (business, admins only) -> (farm, granted) -> family
+    // Cycle to the next space (kept for keyboard/tests); the dropdown calls goToSpace directly
     var order = ['family','private'];
     if(state.isAdmin) order.push('business');
     if(state.isAdmin || state.farmGranted) order.push('farm');
@@ -2752,7 +2779,12 @@ var App = (function(){
     });
     $('si-pass').addEventListener('keydown', function(e){ if(e.key === 'Enter') $('si-btn').click(); });
     $('signout-btn').addEventListener('click', signOut);
-    $('space-btn').addEventListener('click', switchSpace);
+    $('space-select').addEventListener('change', function(){
+      var target = this.value, sel = this;
+      Promise.resolve(goToSpace(target)).then(function(){
+        if(currentSpace() !== target) sel.value = currentSpace(); // PIN cancelled — snap back
+      });
+    });
     $('pin-btn').addEventListener('click', function(){ $('ps-pin').value=''; $('ps-err').style.display='none'; modalOpen('pinset-modal'); });
     $('ps-save').addEventListener('click', savePinSetting);
     $('pin-go').addEventListener('click', tryUnlock);
@@ -2789,6 +2821,7 @@ var App = (function(){
       if(e.key === 'Escape' && openModal) modalClose(openModal);
       if(e.key === 'Escape' && $('pin-lock').classList.contains('open') && pinPending){
         pinPending = null; $('pin-lock').classList.remove('open');
+        if($('space-select')) $('space-select').value = currentSpace();
         toast('Space locked.');
       }
     });
@@ -3035,6 +3068,7 @@ var App = (function(){
     return Promise.all([loadMembers(), loadRates(), loadGrants()])
       .then(function(){
         showApp(); // re-check membership banner
+        setSpace(currentSpace()); // repopulate space options now roles/grants are known
         if(!state.isMember){ setView('dashboard'); return; }
         setView(state.view);
         return Promise.all([loadBills(), loadPayments(), loadExpenses(), loadPlanner(), loadAccounts(), loadDebts(), loadDebtPayments(), loadBudgets(), loadSnapshots(), loadSettings()]).then(function(){ return takeSnapshots(); }).then(function(){ renderAll(); if(currentSpace() === 'family') runDueChecks(); });
@@ -3069,7 +3103,7 @@ var App = (function(){
     netWorth:netWorth, lineChart:lineChart, seriesFor:seriesFor, takeSnapshots:takeSnapshots, renderNetWorth:renderNetWorth,
     hashPin:hashPin, pinRequired:pinRequired, tryUnlock:tryUnlock, nextPlannerWeek:nextPlannerWeek,
     privateUnlocked:privateUnlocked, requirePrivatePin:requirePrivatePin, requireSpacePin:requireSpacePin, savePinSetting:savePinSetting, materialiseIncome:materialiseIncome,
-    currentSpace:currentSpace, spaceFilter:spaceFilter, spaceBody:spaceBody, setSpace:setSpace, switchSpace:switchSpace, moveSpace:moveSpace,
+    currentSpace:currentSpace, spaceFilter:spaceFilter, spaceBody:spaceBody, setSpace:setSpace, switchSpace:switchSpace, goToSpace:goToSpace, moveSpace:moveSpace,
     parseCSV:parseCSV, detectRecurring:detectRecurring, nextDueFromDay:nextDueFromDay,
     calendarFlows:calendarFlows, renderCalendar:renderCalendar, setPlannerMode:setPlannerMode, spaceLabel:spaceLabel,
     nextOnDate:nextOnDate, renderDay:renderDay,
