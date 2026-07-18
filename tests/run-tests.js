@@ -465,7 +465,7 @@ const wait = ms => new Promise(r=>setTimeout(r, ms));
     // snapshot taken on boot (fm_snap unset -> POST fired), incl networth row
     assert((DB.snapshots||[]).some(r=>r.kind==='account' && r.ref_id==='a1'), 'daily snapshot wrote account row');
     assert((DB.snapshots||[]).some(r=>r.kind==='networth' && Number(r.value)===131000), 'daily snapshot wrote net worth row');
-    assert(dom.window.localStorage.getItem('fm_snap') === A.todayISO(), 'snapshot deduped for today');
+    assert(dom.window.localStorage.getItem('fm_snap_family') === A.todayISO(), 'snapshot deduped for today');
     // chart helper edge cases
     assert(A.lineChart([{v:1}],100,30,{}).includes('Not enough history'), 'single point shows building message');
     assert(A.lineChart([{v:1},{v:5},{v:3}],100,30,{}).includes('polyline'), 'multi-point series draws polyline');
@@ -542,6 +542,61 @@ const wait = ms => new Promise(r=>setTimeout(r, ms));
     d.querySelector('button[data-act="ptick"][data-id="pl1"]').click(); // re-tick
     await wait(150);
     assert(DB.planner.filter(x=>x.week_date===next && x.title==='Farm' && !x.paid).length === 1, 'no duplicate next instance on repeated ticks');
+  }
+
+
+  console.log('--- Private spaces ---');
+  {
+    DB.settings=[]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debts=[]; DB.debtPayments=[]; DB.snapshots=[];
+    const reqs = [];
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){
+        w.fetch = function(url, opts){ reqs.push({url, method:(opts&&opts.method)||'GET', body:opts&&opts.body}); return mockFetch(url, opts); };
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}}));
+      }});
+    await wait(200);
+    const d = dom.window.document, A = dom.window.App;
+
+    // Default family space: loads carry the family filter
+    assert(A.currentSpace() === 'family', 'defaults to family space');
+    assert(reqs.some(r=>r.url.includes('fam_bills') && r.url.includes('space=eq.family')), 'family loads filtered to space=family');
+    assert(d.getElementById('space-badge').style.display === 'none', 'no private badge in family space');
+
+    // Switch to private
+    reqs.length = 0;
+    await A.switchSpace(); await wait(100);
+    assert(A.currentSpace() === 'private', 'toggle switches to private');
+    assert(dom.window.localStorage.getItem('fm_space') === 'private', 'space choice persisted');
+    assert(reqs.some(r=>r.url.includes('fam_bills') && r.url.includes('space=eq.private') && r.url.includes('space_owner=eq.' + UID)), 'private loads filtered to own rows only');
+    assert(d.getElementById('space-badge').style.display !== 'none', 'PRIVATE badge visible');
+    assert(d.getElementById('tab-admin').textContent === 'Setup', 'admin tab becomes Setup in private space');
+    assert(d.getElementById('tab-admin').style.display !== 'none', 'Setup available to the user in private space');
+
+    // Creates stamped with space
+    const b = A.spaceBody({name:'x'});
+    assert(b.space === 'private' && b.space_owner === UID, 'spaceBody stamps private + owner');
+    // Add a bill in private space and check the POST body
+    reqs.length = 0;
+    d.getElementById('bill-add-btn').click();
+    d.getElementById('bm-name').value='Gym';
+    d.getElementById('bm-amount').value='30';
+    d.getElementById('bm-due').value=A.todayISO();
+    d.getElementById('bm-save').click(); await wait(120);
+    const post = reqs.find(r=>r.url.includes('fam_bills') && r.method==='POST');
+    assert(post && JSON.parse(post.body).space === 'private' && JSON.parse(post.body).space_owner === UID, 'private bill POSTed with space + owner');
+
+    // Back to family
+    await A.switchSpace(); await wait(80);
+    assert(A.currentSpace() === 'family' && d.getElementById('tab-admin').textContent === 'Admin', 'toggle returns to family; tab reverts to Admin');
+    const fb = A.spaceBody({name:'y'});
+    assert(fb.space === 'family' && fb.space_owner === null, 'spaceBody stamps family with no owner');
+
+    // Move bridge: bill move patches bill + its payments
+    reqs.length = 0;
+    await A.moveSpace('bill','b2'); await wait(60);
+    const patches = reqs.filter(r=>r.method==='PATCH');
+    assert(patches.some(r=>r.url.includes('fam_bills?id=eq.b2')) && patches.some(r=>r.url.includes('fam_bill_payments?bill_id=eq.b2')), 'moving a bill moves its payment history too');
+    assert(patches.every(r=>JSON.parse(r.body).space === 'private'), 'move from family targets private');
   }
 
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');
