@@ -407,6 +407,33 @@ const wait = ms => new Promise(r=>setTimeout(r, ms));
     assert(c.net.GBP === 1000, 'monthly close net = in - out - debt (2000-800-200)');
   }
 
+
+  console.log('--- Asset-backed debts ---');
+  {
+    DB.accounts = []; DB.debtPayments = [];
+    DB.debts = [
+      {id:'d1', name:'Mortgage', debt_type:'loan', owner_name:'Rodney', principal:200000, balance:150000, currency:'GBP', interest_rate:5, min_payment:1200, asset_backed:true, asset_name:'House', asset_value:280000, archived:false},
+      {id:'d2', name:'Barclaycard', debt_type:'credit_card', owner_name:'Rodney', principal:5000, balance:3000, currency:'GBP', interest_rate:24, min_payment:150, asset_backed:false, archived:false}
+    ];
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){ w.fetch = mockFetch;
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}})); }});
+    await wait(180);
+    const d = dom.window.document;
+    const dl = d.getElementById('debts-list').innerHTML;
+    assert(dl.includes('>Asset<'), 'asset badge shown on asset-backed debt');
+    assert(dl.includes('equity: £130,000.00'), 'equity computed (280k value - 150k owed)');
+    const np = d.getElementById('d-debts').innerHTML;
+    assert(np.includes('Wealth-building') && np.includes('Costing debt'), 'net position split into costing vs wealth-building');
+    assert(np.includes('Asset equity built'), 'equity total shown on dashboard');
+    // modal toggle
+    d.getElementById('debt-add-btn').click();
+    assert(d.getElementById('dm-asset-fields').style.display === 'none', 'asset fields hidden by default');
+    d.getElementById('dm-asset').checked = true;
+    d.getElementById('dm-asset').dispatchEvent(new dom.window.Event('change', {bubbles:true}));
+    assert(d.getElementById('dm-asset-fields').style.display === '', 'ticking asset reveals asset fields');
+  }
+
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
