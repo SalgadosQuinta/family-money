@@ -1113,6 +1113,46 @@ async function cycleSpace(dom, A){
     assert(saved && saved.asset_id==='as1' && saved.asset_name===null && saved.asset_value===null, 'link saved; manual duplicate fields nulled');
   }
 
+
+  console.log('--- Asset classes ---');
+  {
+    DB.settings=[]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[];
+    DB.assets=[{id:'as1', name:'Herd', category:'Livestock', owner_name:'TRJ Farms', currency:'USD', value:8000, valued_at:'2026-07-01', archived:false},
+               {id:'as2', name:'Feed stock', category:'Stock / inventory', owner_name:'TRJ Farms', currency:'USD', value:2000, valued_at:'2026-07-01', archived:false},
+               {id:'as3', name:'Second herd', category:'Livestock', owner_name:'TRJ Farms', currency:'USD', value:4000, valued_at:'2026-07-01', archived:false}];
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){ w.fetch = mockFetch;
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}})); }});
+    await wait(200);
+    const d = dom.window.document, A = dom.window.App;
+    assert(A.ASSET_CLASSES.includes('Vehicles') && A.ASSET_CLASSES.includes('Land') && A.ASSET_CLASSES.includes('Stock / inventory') && A.ASSET_CLASSES.includes('Shares & investments'), 'usual asset classes present');
+
+    d.getElementById('asset-add-btn').click();
+    const sel = d.getElementById('asm-class');
+    assert(sel.options.length === A.ASSET_CLASSES.length + 1, 'class dropdown lists all classes plus Other');
+    assert(d.getElementById('asm-class-other').style.display === 'none', 'Other input hidden by default');
+    sel.value='__other';
+    sel.dispatchEvent(new dom.window.Event('change', {bubbles:true}));
+    assert(d.getElementById('asm-class-other').style.display === '', 'choosing Other reveals free text');
+    d.getElementById('asm-name').value='Water rights';
+    d.getElementById('asm-value').value='5000';
+    d.getElementById('asm-class-other').value='Water rights';
+    d.getElementById('asm-save').click(); await wait(120);
+    assert(DB.assets.some(a=>a.name==='Water rights' && a.category==='Water rights'), 'custom class saved via Other');
+
+    // editing an asset with a custom class re-selects Other and fills the text
+    A.state.assets = DB.assets;
+    A.renderAssets();
+    d.querySelector('button[data-act="asedit"][data-id="' + DB.assets.find(a=>a.name==='Water rights').id + '"]').click();
+    assert(sel.value==='__other' && d.getElementById('asm-class-other').value==='Water rights', 'custom class round-trips in the editor');
+    d.querySelector('#asset-modal [data-close]').click();
+
+    // class subtotals when sorted by class
+    A.state.sortAssets='category'; A.renderAssets();
+    const al = d.getElementById('assets-list').innerHTML;
+    assert(al.includes('Livestock — $12,000.00'), 'per-class subtotal shown when sorted by class');
+  }
+
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

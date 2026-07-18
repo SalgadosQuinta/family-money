@@ -700,8 +700,9 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
         <select id="asm-currency"></select></div>
     </div>
     <div class="inline2">
-      <div><label class="f" for="asm-category">Category</label>
-        <input id="asm-category" list="asset-cat-list" placeholder="General"></div>
+      <div><label class="f" for="asm-class">Asset class</label>
+        <select id="asm-class"></select>
+        <input id="asm-class-other" placeholder="Name the class" style="display:none;margin-top:6px"></div>
       <div><label class="f" for="asm-valued">Valued on</label>
         <input id="asm-valued" type="date"></div>
     </div>
@@ -721,10 +722,7 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
     </div>
   </div>
 </div>
-<datalist id="asset-cat-list">
-  <option>Property</option><option>Land</option><option>Vehicle</option><option>Equipment</option>
-  <option>Livestock</option><option>Savings / investments</option><option>General</option>
-</datalist>
+
 
 <!-- Debt modal -->
 <div class="modal-wrap" id="debt-modal">
@@ -2106,6 +2104,25 @@ var App = (function(){
     });
   }
 
+  var ASSET_CLASSES = [
+    'Property — residential','Property — commercial','Land','Vehicles','Equipment & machinery',
+    'Livestock','Crops & produce','Stock / inventory','Shares & investments','Pensions & retirement',
+    'Cash & savings','Business ownership','Jewellery & valuables','Household goods','Electronics',
+    'Tools','Intellectual property','Money owed to us (receivables)','General'
+  ];
+  function fillAssetClassSelect(current){
+    var el = $('asm-class');
+    el.innerHTML = ASSET_CLASSES.map(function(c){
+      return '<option value="' + esc(c) + '">' + esc(c) + '</option>';
+    }).join('') + '<option value="__other">Other — type it in</option>';
+    var other = $('asm-class-other');
+    if(current && ASSET_CLASSES.indexOf(current) < 0){
+      el.value = '__other'; other.style.display = ''; other.value = current;
+    } else {
+      el.value = current || 'General'; other.style.display = 'none'; other.value = '';
+    }
+  }
+
   /* ---------------- assets ---------------- */
   function renderAssets(){
     var totEl = $('assets-total'), el = $('assets-list');
@@ -2116,13 +2133,24 @@ var App = (function(){
       return '<div class="stat"><div class="eyebrow">' + esc(c) + ' total</div><div class="v" style="color:var(--green)">' + esc(fmtMoney(tot[c], c)) + '</div></div>';
     }).join('') : '';
     var rows = sortRows(state.assets, state.sortAssets);
+    var lastClass = null;
     el.innerHTML = rows.length ? rows.map(function(a){
+      var head = '';
+      if(state.sortAssets === 'category' && a.category !== lastClass){
+        lastClass = a.category;
+        var sub = {};
+        state.assets.forEach(function(x){ if(x.category === a.category) sub[x.currency] = (sub[x.currency]||0) + Number(x.value); });
+        head = '<div class="wsec" style="margin-top:12px">' + esc(a.category || 'General') + ' — ' +
+          esc(Object.keys(sub).map(function(c){ return fmtMoney(sub[c], c); }).join(' · ')) + '</div>';
+      }
+      return head + (function(a){
       var financedBy = state.debts.find(function(dd){ return dd.asset_id === a.id; });
       return '<div class="item"><div><div><strong>' + esc(a.name) + '</strong><span class="badge">' + esc(a.category || 'General') + '</span>' + (financedBy ? '<span class="badge brass">financed · ' + esc(financedBy.name) + '</span>' : '') + '</div>' +
         '<div class="small muted">' + esc(a.owner_name) + ' · valued ' + esc(fmtDate(a.valued_at)) +
         (a.notes ? ' · ' + esc(a.notes) : '') + '</div>' +
         '<div class="list-actions"><button class="linkbtn" data-act="asedit" data-id="' + esc(a.id) + '">Edit / revalue</button></div></div>' +
         '<div class="amount" style="color:var(--green)">' + esc(fmtMoney(a.value, a.currency)) + '</div></div>';
+      })(a);
     }).join('') : '<div class="empty">No assets recorded yet. Add the farm, vehicles, property — anything with a value worth tracking.</div>';
     var fin = $('assets-financed');
     var financed = state.debts.filter(function(d){ return d.asset_backed; });
@@ -2141,7 +2169,7 @@ var App = (function(){
     $('asm-name').value = a ? a.name : '';
     $('asm-value').value = a ? a.value : '';
     $('asm-currency').value = a ? a.currency : 'USD';
-    $('asm-category').value = a ? (a.category || '') : '';
+    fillAssetClassSelect(a ? (a.category || 'General') : 'General');
     $('asm-valued').value = a ? a.valued_at : todayISO();
     $('asm-owner-member').value = a && a.owner_member ? a.owner_member : '';
     $('asm-owner-name').value = a && !a.owner_member ? (a.owner_name === 'Family' ? '' : a.owner_name) : '';
@@ -2157,7 +2185,7 @@ var App = (function(){
     var ownerMember = $('asm-owner-member').value || null;
     var body = {
       name:name, value:value, currency:$('asm-currency').value,
-      category:($('asm-category').value.trim() || 'General'),
+      category:($('asm-class').value === '__other' ? ($('asm-class-other').value.trim() || 'General') : $('asm-class').value),
       valued_at:($('asm-valued').value || todayISO()),
       owner_member:ownerMember,
       owner_name: ownerMember ? memberName(ownerMember) : ($('asm-owner-name').value.trim() || 'Family'),
@@ -3140,6 +3168,9 @@ var App = (function(){
     $('debt-sort').addEventListener('change', function(){ state.sortDebts = this.value; renderDebts(); });
     $('asset-add-btn').addEventListener('click', function(){ openAssetModal(null); });
     $('asm-save').addEventListener('click', saveAsset);
+    $('asm-class').addEventListener('change', function(){
+      $('asm-class-other').style.display = this.value === '__other' ? '' : 'none';
+    });
     $('asset-sort').addEventListener('change', function(){ state.sortAssets = this.value; renderAssets(); });
     $('asm-del').addEventListener('click', function(){
       var a = state.editingAsset; if(!a) return;
@@ -3294,7 +3325,7 @@ var App = (function(){
     fridayOf:fridayOf, weeksOfMonth:weeksOfMonth, weekTotals:weekTotals, shiftMonth:shiftMonth,
     moveCard:moveCard, mapCaptureResponse:mapCaptureResponse, renderPlanner:renderPlanner,
     accountBalance:accountBalance, payoffProjection:payoffProjection, monthlyClose:monthlyClose,
-    netWorth:netWorth, renderAssets:renderAssets, debtAssetInfo:debtAssetInfo, debtEquity:debtEquity, lineChart:lineChart, seriesFor:seriesFor, takeSnapshots:takeSnapshots, renderNetWorth:renderNetWorth,
+    netWorth:netWorth, renderAssets:renderAssets, ASSET_CLASSES:ASSET_CLASSES, fillAssetClassSelect:fillAssetClassSelect, debtAssetInfo:debtAssetInfo, debtEquity:debtEquity, lineChart:lineChart, seriesFor:seriesFor, takeSnapshots:takeSnapshots, renderNetWorth:renderNetWorth,
     hashPin:hashPin, pinRequired:pinRequired, tryUnlock:tryUnlock, nextPlannerWeek:nextPlannerWeek,
     privateUnlocked:privateUnlocked, requirePrivatePin:requirePrivatePin, requireSpacePin:requireSpacePin, savePinSetting:savePinSetting, materialiseIncome:materialiseIncome,
     currentSpace:currentSpace, spaceFilter:spaceFilter, spaceBody:spaceBody, setSpace:setSpace, switchSpace:switchSpace, goToSpace:goToSpace, moveSpace:moveSpace,
