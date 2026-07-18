@@ -1153,6 +1153,65 @@ async function cycleSpace(dom, A){
     assert(al.includes('Livestock — $12,000.00'), 'per-class subtotal shown when sorted by class');
   }
 
+
+  console.log('--- Payback planner ---');
+  {
+    DB.settings=[]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[]; DB.assets=[];
+    DB.debts=[{id:'d1', name:'Barclaycard', debt_type:'credit_card', owner_name:'Rodney', principal:5000, balance:3000, currency:'GBP',
+               interest_rate:24, min_payment:150, archived:false},
+              {id:'d2', name:'Zero-rate loan', debt_type:'informal', owner_name:'Family', principal:1200, balance:1200, currency:'GBP',
+               interest_rate:0, min_payment:0, archived:false}];
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){ w.fetch = mockFetch;
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}})); }});
+    await wait(200);
+    const d = dom.window.document, A = dom.window.App;
+
+    // maths
+    const m = A.payoffPlan(1200, 0, 100, 12);
+    assert(m.periods === 12 && m.interest === 0, 'zero-interest monthly plan: 12 months, no interest');
+    const w = A.payoffPlan(1200, 0, 100, 52);
+    assert(w.periods === 12 && w.date < m.date, 'weekly at same amount clears far sooner by date');
+    const withInt = A.payoffPlan(3000, 24, 300, 12);
+    assert(withInt.periods === 12 && withInt.interest > 0, 'interest lengthens payoff (12 vs 10 months flat) and costs money');
+    assert(A.payoffPlan(3000, 24, 50, 12) === null, 'payment below interest never clears');
+    const wk = A.payoffPlan(3000, 24, 75, 52);
+    assert(wk !== null && wk.periods > 0, 'weekly maths uses weekly interest rate');
+
+    // panel: defaults to current payment, renders results
+    d.querySelector('#tabs button[data-view="debts"]').click();
+    const sel = d.getElementById('pp-debt');
+    assert([...sel.options].some(o=>o.textContent.includes('Barclaycard')), 'debt selector lists open debts with balance and rate');
+    sel.value='d1'; A.renderPayback();
+    assert(d.getElementById('pp-amount').value === '150', 'amount defaults to the current monthly payment');
+    assert(d.getElementById('pp-result').innerHTML.includes('Cleared in') && d.getElementById('pp-result').innerHTML.includes('Paid off by'), 'plan shows time and payoff date');
+
+    // raise the payment: comparison line shows savings
+    d.getElementById('pp-amount').value='300';
+    A.renderPayback();
+    const res = d.getElementById('pp-result').innerHTML;
+    assert(res.includes('sooner') && res.includes('saving'), 'comparison vs current payment shows months and interest saved');
+
+    // too-low payment: honest never-clears message with the interest floor
+    d.getElementById('pp-amount').value='50';
+    A.renderPayback();
+    assert(d.getElementById('pp-result').innerHTML.includes('never clears'), 'below-interest payment flagged as never clearing');
+    assert(d.getElementById('pp-actions').style.display === 'none', 'cannot apply a plan that never clears');
+
+    // weekly mode hides the apply button (min_payment is monthly)
+    d.getElementById('pp-amount').value='75';
+    d.getElementById('pp-freq').value='weekly';
+    A.renderPayback();
+    assert(d.getElementById('pp-actions').style.display === 'none', 'apply hidden in weekly mode');
+
+    // apply monthly plan writes min_payment
+    d.getElementById('pp-freq').value='monthly';
+    d.getElementById('pp-amount').value='300';
+    A.renderPayback();
+    d.getElementById('pp-apply').click(); await wait(80);
+    assert(Number(DB.debts.find(x=>x.id==='d1').min_payment) === 300, 'apply sets the debt monthly payment');
+  }
+
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
