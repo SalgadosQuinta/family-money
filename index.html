@@ -189,7 +189,7 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
 <div class="modal-wrap" id="pinset-modal">
   <div class="modal" style="max-width:380px">
     <h3>Finance PIN</h3>
-    <p class="small muted" style="margin-top:0">A 4-digit PIN asked for once per session on this device. A light lock for shared phones — not encryption.</p>
+    <p class="small muted" id="ps-note" style="margin-top:0">A 4-digit PIN asked for once per session on this device. A light lock for shared phones — not encryption.</p>
     <label class="f" for="ps-pin">New PIN (leave blank to remove)</label>
     <input id="ps-pin" type="password" inputmode="numeric" maxlength="4" autocomplete="off">
     <div id="ps-err" class="small" style="color:var(--red);margin-top:8px;display:none"></div>
@@ -1111,12 +1111,29 @@ var App = (function(){
     adminTab.style.display = (sp !== 'family' || state.isAdmin) ? '' : 'none';
     document.querySelectorAll('.fam-only').forEach(function(el){ el.style.display = sp === 'family' ? '' : 'none'; });
   }
+  function switchSpaceReload(){
+    return Promise.all([loadBills(), loadPayments(), loadExpenses(), loadPlanner(),
+      loadAccounts(), loadDebts(), loadDebtPayments(), loadBudgets(), loadSnapshots()])
+      .then(function(){ return takeSnapshots(); })
+      .then(renderAll)
+      .catch(function(e){ toast(e.message); });
+  }
   function switchSpace(){
-    // Cycle: family -> private -> (business, admins only) -> family
+    // Cycle: family -> private -> (business, admins only) -> (farm, granted) -> family
     var order = ['family','private'];
     if(state.isAdmin) order.push('business');
     if(state.isAdmin || state.farmGranted) order.push('farm');
     var sp = order[(order.indexOf(currentSpace()) + 1) % order.length];
+    if(sp === 'private'){
+      return new Promise(function(resolve){
+        requirePrivatePin(function(){
+          setSpace('private');
+          if(state.view === 'admin' && !state.isAdmin) setView('dashboard');
+          toast('Your private space — only you can see this.');
+          switchSpaceReload().then(resolve);
+        });
+      });
+    }
     setSpace(sp);
     if(state.view === 'admin' && sp === 'family' && !state.isAdmin) setView('dashboard');
     toast(sp === 'private' ? 'Your private space — only you can see this.' : sp === 'business' ? 'Business space — visible to you alone.' : sp === 'farm' ? 'TRJ Farms — shared with those granted access.' : 'Shared family space.');
@@ -2287,6 +2304,28 @@ var App = (function(){
   function pinRequired(){
     return !!localStorage.getItem('fm_pin') && sessionStorage.getItem('fm_pin_ok') !== '1';
   }
+  function privateUnlocked(){
+    return sessionStorage.getItem('fm_pin_priv_ok') === '1';
+  }
+  var pinPending = null; // action to run after a successful unlock
+  // Gate for entering the private space: a PIN must exist AND be entered this session
+  function requirePrivatePin(next){
+    if(!localStorage.getItem('fm_pin')){
+      state.pinMustSet = true;
+      $('ps-pin').value = ''; $('ps-err').style.display = 'none';
+      $('ps-note').textContent = 'The private space requires a PIN. Set one to continue.';
+      modalOpen('pinset-modal');
+      pinPending = next;
+      return;
+    }
+    if(!privateUnlocked()){
+      pinPending = next;
+      $('pin-msg').textContent = 'PIN required for your private space';
+      showPinLock();
+      return;
+    }
+    next();
+  }
   function showPinLock(){
     $('pin-lock').classList.add('open');
     $('pin-input').value = '';
@@ -2295,10 +2334,12 @@ var App = (function(){
   function tryUnlock(){
     var pin = $('pin-input').value;
     if(!/^\d{4}$/.test(pin)){ $('pin-msg').textContent = 'Enter 4 digits'; return; }
-    hashPin(pin).then(function(h){
+    return hashPin(pin).then(function(h){
       if(h === localStorage.getItem('fm_pin')){
         sessionStorage.setItem('fm_pin_ok','1');
+        sessionStorage.setItem('fm_pin_priv_ok','1');
         $('pin-lock').classList.remove('open');
+        if(pinPending){ var fn = pinPending; pinPending = null; fn(); }
       } else {
         $('pin-msg').textContent = 'Wrong PIN — try again';
         $('pin-input').value = '';
@@ -2308,14 +2349,20 @@ var App = (function(){
   function savePinSetting(){
     var pin = $('ps-pin').value, errEl = $('ps-err');
     if(pin === ''){
-      localStorage.removeItem('fm_pin'); sessionStorage.removeItem('fm_pin_ok');
-      modalClose('pinset-modal'); toast('PIN removed.'); return;
+      if(state.pinMustSet){ errEl.textContent = 'A PIN is required to use the private space.'; errEl.style.display=''; return; }
+      localStorage.removeItem('fm_pin'); sessionStorage.removeItem('fm_pin_ok'); sessionStorage.removeItem('fm_pin_priv_ok');
+      modalClose('pinset-modal'); toast('PIN removed.');
+      if(currentSpace() === 'private'){ setSpace('family'); switchSpaceReload(); toast('Private space needs a PIN — moved to Family.'); }
+      return;
     }
     if(!/^\d{4}$/.test(pin)){ errEl.textContent = 'The PIN must be exactly 4 digits.'; errEl.style.display=''; return; }
-    hashPin(pin).then(function(h){
+    return hashPin(pin).then(function(h){
       localStorage.setItem('fm_pin', h);
       sessionStorage.setItem('fm_pin_ok','1');
+      sessionStorage.setItem('fm_pin_priv_ok','1');
       modalClose('pinset-modal'); toast('PIN set for this device.');
+      state.pinMustSet = false;
+      if(pinPending){ var fn = pinPending; pinPending = null; fn(); }
     });
   }
 
@@ -2610,10 +2657,22 @@ var App = (function(){
       if(confirmAction){ var fn = confirmAction; confirmAction = null; fn(); }
     });
     document.querySelectorAll('[data-close]').forEach(function(b){
-      b.addEventListener('click', function(){ modalClose(b.getAttribute('data-close')); });
+      b.addEventListener('click', function(){
+        modalClose(b.getAttribute('data-close'));
+        if(b.getAttribute('data-close') === 'pinset-modal' && state.pinMustSet){
+          state.pinMustSet = false; pinPending = null;
+          if(currentSpace() !== 'family'){ setSpace('family'); }
+          toast('The private space stays locked until a PIN is set.');
+        }
+        if(b.getAttribute('data-close') === 'pin-lock'){ pinPending = null; }
+      });
     });
     document.addEventListener('keydown', function(e){
       if(e.key === 'Escape' && openModal) modalClose(openModal);
+      if(e.key === 'Escape' && $('pin-lock').classList.contains('open') && pinPending){
+        pinPending = null; $('pin-lock').classList.remove('open');
+        toast('Private space locked.');
+      }
     });
     $('pl-mode-weeks').addEventListener('click', function(){ setPlannerMode('weeks'); });
     $('pl-mode-cal').addEventListener('click', function(){ setPlannerMode('cal'); });
@@ -2799,7 +2858,11 @@ var App = (function(){
 
   function boot(){
     showApp();
-    if(pinRequired()) showPinLock();
+    if(currentSpace() === 'private' && !privateUnlocked()){
+      // Hold at the lock; fall back to family so nothing private renders behind it
+      setSpace('family');
+      requirePrivatePin(function(){ setSpace('private'); switchSpaceReload(); });
+    } else if(pinRequired()){ showPinLock(); }
     setSpace(currentSpace());
     setPlannerMode(state.plMode);
     $('ex-date').value = todayISO();
@@ -2838,6 +2901,7 @@ var App = (function(){
     accountBalance:accountBalance, payoffProjection:payoffProjection, monthlyClose:monthlyClose,
     netWorth:netWorth, lineChart:lineChart, seriesFor:seriesFor, takeSnapshots:takeSnapshots, renderNetWorth:renderNetWorth,
     hashPin:hashPin, pinRequired:pinRequired, tryUnlock:tryUnlock, nextPlannerWeek:nextPlannerWeek,
+    privateUnlocked:privateUnlocked, requirePrivatePin:requirePrivatePin, savePinSetting:savePinSetting,
     currentSpace:currentSpace, spaceFilter:spaceFilter, spaceBody:spaceBody, setSpace:setSpace, switchSpace:switchSpace, moveSpace:moveSpace,
     parseCSV:parseCSV, detectRecurring:detectRecurring, nextDueFromDay:nextDueFromDay,
     calendarFlows:calendarFlows, renderCalendar:renderCalendar, setPlannerMode:setPlannerMode, spaceLabel:spaceLabel,

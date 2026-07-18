@@ -562,6 +562,10 @@ const wait = ms => new Promise(r=>setTimeout(r, ms));
     await wait(200);
     const d = dom.window.document, A = dom.window.App;
 
+    // pre-unlock the PIN gate so space cycling proceeds (mandatory-PIN suite tests the gate itself)
+    dom.window.localStorage.setItem('fm_pin', await A.hashPin('1234'));
+    dom.window.sessionStorage.setItem('fm_pin_priv_ok','1');
+    dom.window.sessionStorage.setItem('fm_pin_ok','1');
     // Default family space: loads carry the family filter
     assert(A.currentSpace() === 'family', 'defaults to family space');
     assert(reqs.some(r=>r.url.includes('fam_bills') && r.url.includes('space=eq.family')), 'family loads filtered to space=family');
@@ -666,6 +670,10 @@ const wait = ms => new Promise(r=>setTimeout(r, ms));
       }});
     await wait(200);
     const d = dom.window.document, A = dom.window.App;
+    // pre-unlock the PIN gate so space cycling proceeds (mandatory-PIN suite tests the gate itself)
+    dom.window.localStorage.setItem('fm_pin', await A.hashPin('1234'));
+    dom.window.sessionStorage.setItem('fm_pin_priv_ok','1');
+    dom.window.sessionStorage.setItem('fm_pin_ok','1');
     // admin cycles family -> private -> business -> family
     await A.switchSpace(); assert(A.currentSpace()==='private', 'cycle 1: private');
     reqs.length=0;
@@ -724,6 +732,10 @@ const wait = ms => new Promise(r=>setTimeout(r, ms));
       }});
     await wait(200);
     const d = dom.window.document, A = dom.window.App;
+    // pre-unlock the PIN gate so space cycling proceeds (mandatory-PIN suite tests the gate itself)
+    dom.window.localStorage.setItem('fm_pin', await A.hashPin('1234'));
+    dom.window.sessionStorage.setItem('fm_pin_priv_ok','1');
+    dom.window.sessionStorage.setItem('fm_pin_ok','1');
     // admin cycle now includes farm
     await A.switchSpace(); await A.switchSpace(); // private -> business
     reqs.length=0;
@@ -754,6 +766,57 @@ const wait = ms => new Promise(r=>setTimeout(r, ms));
     await wait(80);
     const post = reqs.find(r=>r.url.includes('fam_space_grants') && r.method==='POST');
     assert(post && JSON.parse(post.body).user_id===UID2 && JSON.parse(post.body).space==='farm', 'ticking grants farm access');
+  }
+
+
+  console.log('--- Private space demands a PIN ---');
+  {
+    DB.settings=[]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[];
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){ w.fetch = mockFetch;
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}})); }});
+    await wait(200);
+    const d = dom.window.document, A = dom.window.App;
+
+    // 1. No PIN set: trying to enter private forces the set-PIN modal, space unchanged
+    A.switchSpace(); await wait(60);
+    assert(A.currentSpace() === 'family', 'without a PIN the space does not switch');
+    assert(d.getElementById('pinset-modal').classList.contains('open'), 'mandatory set-PIN modal opens');
+    assert(d.getElementById('ps-note').textContent.includes('requires a PIN'), 'modal explains the requirement');
+    // blank save rejected while mandatory
+    d.getElementById('ps-pin').value = '';
+    A.savePinSetting(); await wait(30);
+    assert(d.getElementById('pinset-modal').classList.contains('open'), 'blank PIN rejected when mandatory');
+    // cancel returns cleanly to family
+    d.querySelector('[data-close="pinset-modal"]').click(); await wait(30);
+    assert(A.currentSpace() === 'family' && !d.getElementById('pinset-modal').classList.contains('open'), 'cancel keeps family space');
+
+    // 2. Setting a PIN completes the pending entry into private
+    A.switchSpace(); await wait(60);
+    d.getElementById('ps-pin').value = '4321';
+    await A.savePinSetting(); await wait(150);
+    assert(A.currentSpace() === 'private', 'after setting the PIN, private opens');
+    assert(dom.window.sessionStorage.getItem('fm_pin_priv_ok') === '1', 'private unlock recorded for the session');
+
+    // 3. Fresh session with PIN set: lock demanded before private shows
+    dom.window.sessionStorage.removeItem('fm_pin_priv_ok');
+    dom.window.sessionStorage.removeItem('fm_pin_ok');
+    await A.boot(); await wait(150);
+    assert(d.getElementById('pin-lock').classList.contains('open'), 'boot into private demands the PIN');
+    assert(A.currentSpace() === 'family', 'nothing private renders behind the lock');
+    d.getElementById('pin-input').value = '9999';
+    await A.tryUnlock(); await wait(50);
+    assert(d.getElementById('pin-lock').classList.contains('open'), 'wrong PIN keeps private locked');
+    d.getElementById('pin-input').value = '4321';
+    await A.tryUnlock(); await wait(150);
+    assert(A.currentSpace() === 'private', 'correct PIN restores the private space');
+
+    // 4. Removing the PIN while in private bounces to family
+    A.state.pinMustSet = false;
+    d.getElementById('ps-pin').value = '';
+    A.savePinSetting(); await wait(100);
+    assert(A.currentSpace() === 'family', 'removing the PIN exits the private space');
+    assert(dom.window.localStorage.getItem('fm_pin') === null, 'PIN cleared');
   }
 
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');
