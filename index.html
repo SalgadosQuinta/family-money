@@ -590,13 +590,22 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
       <div><label class="f" for="im-currency">Currency</label>
         <select id="im-currency"></select></div>
     </div>
-    <label class="f" for="im-week">Week (Friday)</label>
-    <select id="im-week"></select>
+    <div class="inline2">
+      <div><label class="f" for="im-week">Week (Friday)</label>
+        <select id="im-week"></select></div>
+      <div><label class="f" for="im-recur">Repeats</label>
+        <select id="im-recur">
+          <option value="none">One-off</option>
+          <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
+        </select></div>
+    </div>
     <label class="f" for="im-account">Into account</label>
     <select id="im-account" class="acct-select"></select>
     <div id="im-err" class="small" style="color:var(--red);margin-top:8px;display:none"></div>
     <div class="btnrow">
-      <button class="btn danger" id="im-del" style="margin-right:auto;display:none">Delete</button>
+      <button class="btn danger" id="im-del" style="margin-right:auto;display:none">Delete this week</button>
+      <button class="btn ghost" id="im-stop" style="display:none">Stop series</button>
       <button class="btn ghost" data-close="inc-modal">Cancel</button>
       <button class="btn primary" id="im-save">Save</button>
     </div>
@@ -1124,12 +1133,12 @@ var App = (function(){
     if(state.isAdmin) order.push('business');
     if(state.isAdmin || state.farmGranted) order.push('farm');
     var sp = order[(order.indexOf(currentSpace()) + 1) % order.length];
-    if(sp === 'private'){
+    if(sp === 'private' || sp === 'business'){
       return new Promise(function(resolve){
-        requirePrivatePin(function(){
-          setSpace('private');
-          if(state.view === 'admin' && !state.isAdmin) setView('dashboard');
-          toast('Your private space — only you can see this.');
+        requireSpacePin(sp, function(){
+          setSpace(sp);
+          if(state.view === 'admin' && sp === 'private' && !state.isAdmin) setView('dashboard');
+          toast(sp === 'private' ? 'Your private space — only you can see this.' : 'Business space — visible to you alone.');
           switchSpaceReload().then(resolve);
         });
       });
@@ -1204,6 +1213,32 @@ var App = (function(){
     return apiJSON('/rest/v1/fam_expenses?select=*&spent_at=gte.' + from + '&order=spent_at.desc' + spaceFilter())
       .then(function(rows){ state.expenses = rows || []; });
   }
+  // For each recurring income series, create the missing future instances up to
+  // the end of next month. Only creates FORWARD from the latest existing instance,
+  // so a deleted middle week (a week off) stays deleted.
+  function materialiseIncome(windowEndISO){
+    var series = {};
+    state.income.forEach(function(i){
+      if(!i.recurrence || i.recurrence === 'none') return;
+      var key = i.series_id || i.id;
+      (series[key] = series[key] || []).push(i);
+    });
+    var posts = [];
+    Object.keys(series).forEach(function(key){
+      var rows = series[key].sort(function(a,b){ return a.week_date < b.week_date ? -1 : 1; });
+      var last = rows[rows.length - 1], guard = 0;
+      var next = nextPlannerWeek(last.week_date, last.recurrence);
+      while(next <= windowEndISO && guard++ < 12){
+        posts.push(apiJSON('/rest/v1/fam_income', {method:'POST', headers:{'Prefer':'return=minimal'},
+          body: JSON.stringify(spaceBody({person:last.person, amount:last.amount, currency:last.currency,
+            week_date:next, recurrence:last.recurrence, series_id:key,
+            account_id:last.account_id || null}))}));
+        next = nextPlannerWeek(next, last.recurrence);
+      }
+    });
+    if(!posts.length) return Promise.resolve(false);
+    return Promise.all(posts).then(function(){ return true; }).catch(function(){ return false; });
+  }
   function loadPlanner(){
     // Load a generous window around the visible month (±1 month) so drags across edges stay loaded
     var ym = state.plMonth || todayISO().slice(0,7);
@@ -1214,6 +1249,12 @@ var App = (function(){
     ]).then(function(res){
       state.income = res[0] || [];
       state.planItems = res[1] || [];
+      var windowEnd = shiftMonth(ym, 2) + '-01';
+      return materialiseIncome(windowEnd).then(function(created){
+        if(!created) return;
+        return apiJSON('/rest/v1/fam_income?select=*&week_date=gte.' + from + '&week_date=lt.' + to + '&order=week_date.asc' + spaceFilter())
+          .then(function(rows){ state.income = rows || state.income; });
+      });
     }).catch(function(){
       // Planner tables not migrated yet (or offline) — degrade gracefully
       state.income = []; state.planItems = [];
@@ -1453,7 +1494,7 @@ var App = (function(){
       var t = weekTotals(w, state.income, state.planItems, state.bills);
       var incCards = state.income.filter(function(i){ return i.week_date === w; }).map(function(i){
         return '<div class="card income" draggable="true" data-kind="income" data-id="' + esc(i.id) + '">' +
-          '<div class="crow"><span class="ctitle">' + esc(i.person) + '</span>' +
+          '<div class="crow"><span class="ctitle">' + esc(i.person) + (i.recurrence && i.recurrence !== 'none' ? ' <span class="badge brass">' + esc(i.recurrence) + '</span>' : '') + '</span>' +
           '<span class="amount">' + esc(fmtMoney(i.amount, i.currency)) + '</span></div></div>';
       }).join('');
       var billCards = state.bills.filter(function(b){ return !b.archived && fridayOf(b.due_date) === w; }).map(function(b){
@@ -1642,6 +1683,8 @@ var App = (function(){
     $('im-person').value = inc ? inc.person : '';
     $('im-amount').value = inc ? inc.amount : '';
     $('im-currency').value = inc ? inc.currency : 'GBP';
+    $('im-recur').value = inc ? (inc.recurrence || 'none') : 'none';
+    $('im-stop').style.display = (inc && inc.recurrence && inc.recurrence !== 'none') ? '' : 'none';
     fillWeekSelect('im-week', inc ? inc.week_date : week);
     var dl = $('person-list'); dl.innerHTML = '';
     var seen = {};
@@ -1655,6 +1698,7 @@ var App = (function(){
     var errEl = $('im-err');
     if(!person || !(amount >= 0)){ errEl.textContent = 'Person and a valid amount are required.'; errEl.style.display=''; return; }
     var body = {person:person, amount:amount, currency:$('im-currency').value, week_date:$('im-week').value,
+      recurrence:$('im-recur').value,
       account_id:($('im-account').value || null)};
     var p = state.editingIncome
       ? apiJSON('/rest/v1/fam_income?id=eq.' + state.editingIncome.id, {method:'PATCH', body:JSON.stringify(body)})
@@ -2308,24 +2352,22 @@ var App = (function(){
     return sessionStorage.getItem('fm_pin_priv_ok') === '1';
   }
   var pinPending = null; // action to run after a successful unlock
-  // Gate for entering the private space: a PIN must exist AND be entered this session
-  function requirePrivatePin(next){
+  // Gate for the private and business spaces: a PIN must exist and is demanded
+  // on EVERY entry — switching away and back asks again.
+  function requireSpacePin(spaceName, next){
     if(!localStorage.getItem('fm_pin')){
       state.pinMustSet = true;
       $('ps-pin').value = ''; $('ps-err').style.display = 'none';
-      $('ps-note').textContent = 'The private space requires a PIN. Set one to continue.';
+      $('ps-note').textContent = 'The ' + spaceLabel(spaceName).toLowerCase() + ' space requires a PIN. Set one to continue.';
       modalOpen('pinset-modal');
       pinPending = next;
       return;
     }
-    if(!privateUnlocked()){
-      pinPending = next;
-      $('pin-msg').textContent = 'PIN required for your private space';
-      showPinLock();
-      return;
-    }
-    next();
+    pinPending = next;
+    $('pin-msg').textContent = 'PIN required for the ' + spaceLabel(spaceName).toLowerCase() + ' space';
+    showPinLock();
   }
+  function requirePrivatePin(next){ return requireSpacePin('private', next); }
   function showPinLock(){
     $('pin-lock').classList.add('open');
     $('pin-input').value = '';
@@ -2662,7 +2704,7 @@ var App = (function(){
         if(b.getAttribute('data-close') === 'pinset-modal' && state.pinMustSet){
           state.pinMustSet = false; pinPending = null;
           if(currentSpace() !== 'family'){ setSpace('family'); }
-          toast('The private space stays locked until a PIN is set.');
+          toast('That space stays locked until a PIN is set.');
         }
         if(b.getAttribute('data-close') === 'pin-lock'){ pinPending = null; }
       });
@@ -2671,7 +2713,7 @@ var App = (function(){
       if(e.key === 'Escape' && openModal) modalClose(openModal);
       if(e.key === 'Escape' && $('pin-lock').classList.contains('open') && pinPending){
         pinPending = null; $('pin-lock').classList.remove('open');
-        toast('Private space locked.');
+        toast('Space locked.');
       }
     });
     $('pl-mode-weeks').addEventListener('click', function(){ setPlannerMode('weeks'); });
@@ -2702,6 +2744,17 @@ var App = (function(){
       apiJSON('/rest/v1/fam_planner_items?id=eq.' + it.id, {method:'DELETE'})
         .then(function(){ modalClose('pitem-modal'); return loadPlanner().then(renderPlanner); })
         .catch(function(e){ toast(e.message); });
+    });
+    $('im-stop').addEventListener('click', function(){
+      var inc = state.editingIncome; if(!inc) return;
+      var key = inc.series_id || inc.id;
+      askConfirm('Stop recurring income', 'Existing weeks stay; no further weeks will be created for ' + inc.person + '.', function(){
+        modalClose('inc-modal');
+        Promise.all([
+          apiJSON('/rest/v1/fam_income?id=eq.' + key, {method:'PATCH', body:JSON.stringify({recurrence:'none'})}).catch(function(){}),
+          apiJSON('/rest/v1/fam_income?series_id=eq.' + key, {method:'PATCH', body:JSON.stringify({recurrence:'none'})}).catch(function(){})
+        ]).then(function(){ toast('Series stopped.'); return loadPlanner().then(renderPlanner); });
+      });
     });
     $('im-del').addEventListener('click', function(){
       var inc = state.editingIncome; if(!inc) return;
@@ -2858,10 +2911,11 @@ var App = (function(){
 
   function boot(){
     showApp();
-    if(currentSpace() === 'private' && !privateUnlocked()){
-      // Hold at the lock; fall back to family so nothing private renders behind it
+    if(currentSpace() === 'private' || currentSpace() === 'business'){
+      // Hold at the lock; fall back to family so nothing gated renders behind it
+      var target = currentSpace();
       setSpace('family');
-      requirePrivatePin(function(){ setSpace('private'); switchSpaceReload(); });
+      requireSpacePin(target, function(){ setSpace(target); switchSpaceReload(); });
     } else if(pinRequired()){ showPinLock(); }
     setSpace(currentSpace());
     setPlannerMode(state.plMode);
@@ -2901,7 +2955,7 @@ var App = (function(){
     accountBalance:accountBalance, payoffProjection:payoffProjection, monthlyClose:monthlyClose,
     netWorth:netWorth, lineChart:lineChart, seriesFor:seriesFor, takeSnapshots:takeSnapshots, renderNetWorth:renderNetWorth,
     hashPin:hashPin, pinRequired:pinRequired, tryUnlock:tryUnlock, nextPlannerWeek:nextPlannerWeek,
-    privateUnlocked:privateUnlocked, requirePrivatePin:requirePrivatePin, savePinSetting:savePinSetting,
+    privateUnlocked:privateUnlocked, requirePrivatePin:requirePrivatePin, requireSpacePin:requireSpacePin, savePinSetting:savePinSetting, materialiseIncome:materialiseIncome,
     currentSpace:currentSpace, spaceFilter:spaceFilter, spaceBody:spaceBody, setSpace:setSpace, switchSpace:switchSpace, moveSpace:moveSpace,
     parseCSV:parseCSV, detectRecurring:detectRecurring, nextDueFromDay:nextDueFromDay,
     calendarFlows:calendarFlows, renderCalendar:renderCalendar, setPlannerMode:setPlannerMode, spaceLabel:spaceLabel,

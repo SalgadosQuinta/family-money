@@ -120,6 +120,17 @@ function makeDom(){
 }
 
 const wait = ms => new Promise(r=>setTimeout(r, ms));
+async function cycleSpace(dom, A){
+  const d = dom.window.document;
+  const p = A.switchSpace();
+  await wait(40);
+  if(d.getElementById('pinset-modal') && d.getElementById('pinset-modal').classList.contains('open')){
+    d.getElementById('ps-pin').value='1234'; await A.savePinSetting();
+  } else if(d.getElementById('pin-lock') && d.getElementById('pin-lock').classList.contains('open')){
+    d.getElementById('pin-input').value='1234'; await A.tryUnlock();
+  }
+  await p; await wait(40);
+}
 
 (async function(){
   console.log('--- Unit: pure helpers ---');
@@ -573,7 +584,7 @@ const wait = ms => new Promise(r=>setTimeout(r, ms));
 
     // Switch to private
     reqs.length = 0;
-    await A.switchSpace(); await wait(100);
+    await cycleSpace(dom, A);
     assert(A.currentSpace() === 'private', 'toggle switches to private');
     assert(dom.window.localStorage.getItem('fm_space') === 'private', 'space choice persisted');
     assert(reqs.some(r=>r.url.includes('fam_bills') && r.url.includes('space=eq.private') && r.url.includes('space_owner=eq.' + UID)), 'private loads filtered to own rows only');
@@ -595,7 +606,7 @@ const wait = ms => new Promise(r=>setTimeout(r, ms));
     assert(post && JSON.parse(post.body).space === 'private' && JSON.parse(post.body).space_owner === UID, 'private bill POSTed with space + owner');
 
     // Cycle continues however many spaces exist, back to family
-    for(let i=0;i<5 && A.currentSpace()!=='family';i++){ await A.switchSpace(); await wait(60); }
+    for(let i=0;i<5 && A.currentSpace()!=='family';i++){ await cycleSpace(dom, A); }
     assert(A.currentSpace() === 'family' && d.getElementById('tab-admin').textContent === 'Admin', 'toggle returns to family; tab reverts to Admin');
     const fb = A.spaceBody({name:'y'});
     assert(fb.space === 'family' && fb.space_owner === null, 'spaceBody stamps family with no owner');
@@ -675,22 +686,22 @@ const wait = ms => new Promise(r=>setTimeout(r, ms));
     dom.window.sessionStorage.setItem('fm_pin_priv_ok','1');
     dom.window.sessionStorage.setItem('fm_pin_ok','1');
     // admin cycles family -> private -> business -> family
-    await A.switchSpace(); assert(A.currentSpace()==='private', 'cycle 1: private');
+    await cycleSpace(dom, A); assert(A.currentSpace()==='private', 'cycle 1: private');
     reqs.length=0;
-    await A.switchSpace(); await wait(80);
+    await cycleSpace(dom, A);
     assert(A.currentSpace()==='business', 'cycle 2: business (admin only)');
     assert(reqs.some(r=>r.url.includes('fam_bills') && r.url.includes('space=eq.business')), 'business loads filtered to space=business');
     assert(d.getElementById('space-badge').textContent==='BUSINESS', 'BUSINESS badge shown');
     const b = A.spaceBody({name:'x'});
     assert(b.space==='business' && b.space_owner===null, 'business rows stamped without individual owner');
     assert(d.getElementById('tab-admin').textContent==='Setup' && d.getElementById('tab-admin').style.display!=='none', 'business space has Setup tab');
-    for(let i=0;i<5 && A.currentSpace()!=='family';i++){ await A.switchSpace(); }
+    for(let i=0;i<5 && A.currentSpace()!=='family';i++){ await cycleSpace(dom, A); }
     assert(A.currentSpace()==='family', 'cycle wraps back to family');
 
     // non-admin never reaches business
     A.state.isAdmin = false; A.state.farmGranted = false;
-    await A.switchSpace(); assert(A.currentSpace()==='private', 'member cycle 1: private');
-    await A.switchSpace(); assert(A.currentSpace()==='family', 'member cycle 2: family (business skipped)');
+    await cycleSpace(dom, A); assert(A.currentSpace()==='private', 'member cycle 1: private');
+    await cycleSpace(dom, A); assert(A.currentSpace()==='family', 'member cycle 2: family (business skipped)');
     A.setSpace('business');
     assert(A.currentSpace()==='family', 'setSpace refuses business for non-admin');
     A.state.isAdmin = true;
@@ -737,20 +748,20 @@ const wait = ms => new Promise(r=>setTimeout(r, ms));
     dom.window.sessionStorage.setItem('fm_pin_priv_ok','1');
     dom.window.sessionStorage.setItem('fm_pin_ok','1');
     // admin cycle now includes farm
-    await A.switchSpace(); await A.switchSpace(); // private -> business
+    await cycleSpace(dom, A); await cycleSpace(dom, A); // private -> business
     reqs.length=0;
-    await A.switchSpace(); await wait(80); // -> farm
+    await cycleSpace(dom, A); // -> farm
     assert(A.currentSpace()==='farm', 'admin cycle reaches TRJ Farms');
     assert(reqs.some(r=>r.url.includes('fam_bills') && r.url.includes('space=eq.farm')), 'farm loads filtered to space=farm');
     assert(d.getElementById('space-badge').textContent==='TRJ FARMS', 'TRJ FARMS badge shown');
     assert(A.spaceBody({}).space==='farm', 'farm rows stamped with farm space');
-    await A.switchSpace(); assert(A.currentSpace()==='family', 'cycle wraps to family');
+    await cycleSpace(dom, A); assert(A.currentSpace()==='family', 'cycle wraps to family');
 
     // granted non-admin reaches farm but not business
     A.state.isAdmin=false; A.state.farmGranted=true;
-    await A.switchSpace(); assert(A.currentSpace()==='private', 'granted member: private');
-    await A.switchSpace(); assert(A.currentSpace()==='farm', 'granted member reaches farm, business skipped');
-    await A.switchSpace(); assert(A.currentSpace()==='family', 'granted member wraps to family');
+    await cycleSpace(dom, A); assert(A.currentSpace()==='private', 'granted member: private');
+    await cycleSpace(dom, A); assert(A.currentSpace()==='farm', 'granted member reaches farm, business skipped');
+    await cycleSpace(dom, A); assert(A.currentSpace()==='family', 'granted member wraps to family');
     // ungranted member never reaches farm
     A.state.farmGranted=false;
     A.setSpace('farm'); assert(A.currentSpace()==='family', 'setSpace refuses farm without grant');
@@ -817,6 +828,95 @@ const wait = ms => new Promise(r=>setTimeout(r, ms));
     A.savePinSetting(); await wait(100);
     assert(A.currentSpace() === 'family', 'removing the PIN exits the private space');
     assert(dom.window.localStorage.getItem('fm_pin') === null, 'PIN cleared');
+  }
+
+
+  console.log('--- PIN demanded on EVERY gated entry (private & business) ---');
+  {
+    DB.settings=[]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[];
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){ w.fetch = mockFetch;
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}})); }});
+    await wait(200);
+    const d = dom.window.document, A = dom.window.App;
+    dom.window.localStorage.setItem('fm_pin', await A.hashPin('1234'));
+
+    // Entry 1: family -> private prompts
+    let p = A.switchSpace(); await wait(40);
+    assert(d.getElementById('pin-lock').classList.contains('open'), 'entering private prompts for PIN');
+    d.getElementById('pin-input').value='1234'; await A.tryUnlock(); await p; await wait(40);
+    assert(A.currentSpace()==='private', 'unlock enters private');
+
+    // Entry 2: private -> business prompts AGAIN despite session unlock
+    p = A.switchSpace(); await wait(40);
+    assert(d.getElementById('pin-lock').classList.contains('open'), 'flicking to business prompts again — session unlock not reused');
+    assert(A.currentSpace()==='private', 'business not entered before unlock');
+    d.getElementById('pin-input').value='1234'; await A.tryUnlock(); await p; await wait(40);
+    assert(A.currentSpace()==='business', 'unlock enters business');
+
+    // farm and family remain ungated
+    p = A.switchSpace(); await wait(40);
+    assert(!d.getElementById('pin-lock').classList.contains('open') && A.currentSpace()==='farm', 'farm entry not PIN-gated');
+    await p;
+    p = A.switchSpace(); await p; await wait(30);
+    assert(A.currentSpace()==='family', 'family entry not PIN-gated');
+
+    // Entry 3: returning to private prompts a third time
+    p = A.switchSpace(); await wait(40);
+    assert(d.getElementById('pin-lock').classList.contains('open'), 'every re-entry re-prompts');
+    d.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape', bubbles:true}));
+    await wait(30);
+    assert(A.currentSpace()==='family', 'Escape abandons entry, stays in family');
+  }
+
+  console.log('--- Recurring income: materialise + skip a week + stop ---');
+  {
+    DB.settings=[]; DB.planner=[]; DB.accounts=[]; DB.debts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[];
+    DB.income = null;
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){
+        w.fetch = function(url, opts){
+          opts = opts || {};
+          if(url.includes('/rest/v1/fam_income')){
+            const method=(opts.method||'GET');
+            if(method==='GET') return Promise.resolve({ok:true,status:200,text:()=>Promise.resolve(JSON.stringify(DB.income||[])),json:()=>Promise.resolve(DB.income||[])});
+            if(method==='POST'){ DB.income.push(Object.assign({id:'inc'+(DB.income.length+1)}, JSON.parse(opts.body))); return Promise.resolve({ok:true,status:201,text:()=>Promise.resolve('')}); }
+            if(method==='PATCH'){
+              const idm=/id=eq\.([^&]+)/.exec(url), sm=/series_id=eq\.([^&]+)/.exec(url);
+              DB.income.forEach(r=>{ if((idm&&r.id===idm[1])||(sm&&r.series_id===sm[1])) Object.assign(r, JSON.parse(opts.body)); });
+              return Promise.resolve({ok:true,status:204,text:()=>Promise.resolve('')});
+            }
+            if(method==='DELETE'){ const id=/id=eq\.([^&]+)/.exec(url)[1]; DB.income=DB.income.filter(r=>r.id!==id); return Promise.resolve({ok:true,status:204,text:()=>Promise.resolve('')}); }
+          }
+          return mockFetch(url, opts);
+        };
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}}));
+      }});
+    await wait(150);
+    const A = dom.window.App;
+    const w0 = A.weeksOfMonth(A.state.plMonth)[0];
+    DB.income = [{id:'seed', person:'Rodney', amount:1800, currency:'GBP', week_date:w0, recurrence:'weekly', series_id:null, space:'family'}];
+    await A.boot(); await wait(200);
+    const weeks = DB.income.map(r=>r.week_date).sort();
+    assert(DB.income.length > 4, 'weekly income materialised forward (' + DB.income.length + ' instances)');
+    assert(DB.income.every(r=>r.person==='Rodney' && Number(r.amount)===1800), 'instances copy person and amount');
+    assert(DB.income.slice(1).every(r=>r.series_id==='seed'), 'instances linked to the series');
+    const before = DB.income.length;
+    await A.boot(); await wait(200);
+    assert(DB.income.length === before, 'second load creates no duplicates');
+
+    // skip a week: delete a middle instance, reload — it stays deleted
+    const middle = DB.income[2];
+    DB.income = DB.income.filter(r=>r.id!==middle.id);
+    await A.boot(); await wait(200);
+    assert(!DB.income.some(r=>r.week_date===middle.week_date && r.person==='Rodney'), 'deleted middle week stays deleted (week off)');
+
+    // stop series: no further instances beyond current end
+    DB.income.forEach(r=>{ r.recurrence='none'; });
+    const count2 = DB.income.length;
+    A.state.plMonth = A.shiftMonth(A.state.plMonth, 1);
+    await A.boot(); await wait(200);
+    assert(DB.income.length === count2, 'stopped series creates nothing further');
   }
 
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');
