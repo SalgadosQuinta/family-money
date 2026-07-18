@@ -173,6 +173,9 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
     <button data-view="bills">Bills</button>
     <button data-view="expenses">Expenses</button>
     <button data-view="planner">Planner</button>
+    <button data-view="debts">Debts</button>
+    <button data-view="analysis">Analysis</button>
+    <button data-view="admin" id="tab-admin" style="display:none">Admin</button>
   </nav>
 </header>
 
@@ -200,8 +203,17 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
       </div>
     </div>
     <div class="panel">
+      <h2>Net position — what we owe</h2>
+      <div id="d-debts"></div>
+    </div>
+    <div class="panel">
       <h2>Paid this month — by member</h2>
       <div id="d-members"></div>
+    </div>
+    <div class="panel" id="notif-card" style="display:none">
+      <h2>Notifications</h2>
+      <p class="small muted" style="margin-top:0">Get an alert when your bills are due, go overdue, or a debt payment is coming up.</p>
+      <div class="btnrow" style="justify-content:flex-start"><button class="btn" id="notif-btn">Enable notifications</button></div>
     </div>
   </section>
 
@@ -209,7 +221,17 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
   <section id="view-bills" style="display:none">
     <div class="row" style="margin-bottom:12px">
       <span class="eyebrow">Household bills &amp; commitments</span>
-      <button class="btn primary" id="bill-add-btn">Add bill</button>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select id="bills-sort" style="width:auto;padding:6px 8px;font-size:13px">
+          <option value="due_date">Sort: due date</option>
+          <option value="amount">Sort: amount</option>
+          <option value="name">Sort: name</option>
+          <option value="category">Sort: category</option>
+          <option value="account">Sort: account</option>
+          <option value="responsible">Sort: responsible</option>
+        </select>
+        <button class="btn primary" id="bill-add-btn">Add bill</button>
+      </div>
     </div>
     <div class="panel"><div id="bills-list"><div class="empty">Loading…</div></div></div>
     <div class="panel">
@@ -234,14 +256,25 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
         <div><label class="f" for="ex-date">Date</label>
           <input id="ex-date" type="date"></div>
       </div>
-      <label class="f" for="ex-note">Note</label>
-      <input id="ex-note" placeholder="Optional">
+      <div class="inline2">
+        <div><label class="f" for="ex-account">From account</label>
+          <select id="ex-account" class="acct-select"></select></div>
+        <div><label class="f" for="ex-note">Note</label>
+          <input id="ex-note" placeholder="Optional"></div>
+      </div>
       <label class="f" for="ex-receipt">Receipt photo</label>
       <input id="ex-receipt" type="file" accept="image/*">
       <div class="btnrow"><button class="btn primary" id="ex-save-btn">Add expense</button></div>
     </div>
     <div class="panel">
-      <h2>Recent expenses (60 days)</h2>
+      <div class="row"><h2>Recent expenses (60 days)</h2>
+        <select id="ex-sort" style="width:auto;padding:6px 8px;font-size:13px">
+          <option value="spent_at">Sort: date</option>
+          <option value="amount">Sort: amount</option>
+          <option value="category">Sort: category</option>
+          <option value="account">Sort: account</option>
+        </select>
+      </div>
       <div id="expenses-list"><div class="empty">Loading…</div></div>
     </div>
   </section>
@@ -262,6 +295,86 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
       <p class="small muted" style="margin-top:0">Paste a bill, email or statement. Claude will propose items to add to the planner — you review before anything is saved.</p>
       <textarea id="cap-text" placeholder="Paste text here…" style="min-height:90px"></textarea>
       <div class="btnrow"><button class="btn primary" id="cap-btn">Analyse</button></div>
+    </div>
+  </section>
+
+  <!-- DEBTS -->
+  <section id="view-debts" style="display:none">
+    <div class="row" style="margin-bottom:12px">
+      <span class="eyebrow">Credit cards, loans &amp; long-term owing</span>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select id="debt-sort" style="width:auto;padding:6px 8px;font-size:13px">
+          <option value="balance">Sort: balance</option>
+          <option value="owner_name">Sort: owner</option>
+          <option value="due_day">Sort: due day</option>
+          <option value="interest_rate">Sort: interest rate</option>
+          <option value="name">Sort: name</option>
+        </select>
+        <button class="btn primary" id="debt-add-btn">Add debt</button>
+      </div>
+    </div>
+    <div class="panel"><div id="debts-list"><div class="empty">Loading…</div></div></div>
+    <div class="panel">
+      <h2>Recent debt payments</h2>
+      <div id="debt-payments-list"><div class="empty">Loading…</div></div>
+    </div>
+  </section>
+
+  <!-- ANALYSIS -->
+  <section id="view-analysis" style="display:none">
+    <div class="panel">
+      <h2>Monthly close — last 6 months</h2>
+      <p class="small muted" style="margin-top:0">In vs out vs debt paid down. Net positive months build the position; negative months erode it.</p>
+      <div id="an-close"></div>
+    </div>
+    <div class="grid2">
+      <div class="panel">
+        <h2>Monthly totals — bills + expenses</h2>
+        <div id="an-monthly"></div>
+      </div>
+      <div class="panel">
+        <h2>Category breakdown — last 90 days</h2>
+        <div id="an-cats"></div>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Budgets — this month</h2>
+      <div id="an-budgets"></div>
+    </div>
+    <div class="panel">
+      <h2>Export</h2>
+      <p class="small muted" style="margin-top:0">Download the data as CSV for the accountant or your own spreadsheet.</p>
+      <div class="btnrow" style="justify-content:flex-start;flex-wrap:wrap">
+        <button class="btn ghost" data-csv="bills">Bills</button>
+        <button class="btn ghost" data-csv="payments">Bill payments</button>
+        <button class="btn ghost" data-csv="expenses">Expenses</button>
+        <button class="btn ghost" data-csv="debts">Debts</button>
+        <button class="btn ghost" data-csv="debt_payments">Debt payments</button>
+        <button class="btn ghost" data-csv="income">Income</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ADMIN -->
+  <section id="view-admin" style="display:none">
+    <div class="panel">
+      <h2>Family members</h2>
+      <p class="small muted" style="margin-top:0">Add an existing login account to the family space by email. Creating new login accounts and resetting passwords stays in your GTD console.</p>
+      <div id="ad-members"></div>
+      <div class="inline2" style="margin-top:10px">
+        <input id="ad-mem-email" type="email" placeholder="email@example.com" inputmode="email">
+        <button class="btn" id="ad-mem-add">Add member</button>
+      </div>
+      <div id="ad-mem-err" class="small" style="color:var(--red);margin-top:6px;display:none"></div>
+    </div>
+    <div class="panel">
+      <div class="row"><h2>Accounts</h2><button class="btn" id="acct-add-btn">Add account</button></div>
+      <p class="small muted" style="margin-top:0">Bank, cash, mobile money, credit card, intermediary and personal accounts. Balances are worked out from tagged transactions.</p>
+      <div id="ad-accounts"></div>
+    </div>
+    <div class="panel">
+      <div class="row"><h2>Category budgets</h2><button class="btn" id="bud-add-btn">Add budget</button></div>
+      <div id="ad-budgets"></div>
     </div>
   </section>
 </main>
@@ -302,6 +415,8 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
       <div><label class="f" for="bm-responsible">Responsible</label>
         <select id="bm-responsible"></select></div>
     </div>
+    <label class="f" for="bm-account">Paid from account</label>
+    <select id="bm-account" class="acct-select"></select>
     <label class="f" for="bm-notes">Notes</label>
     <textarea id="bm-notes"></textarea>
     <label class="f" for="bm-receipt">Invoice / receipt photo</label>
@@ -326,6 +441,8 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
       <div><label class="f">Currency</label>
         <input id="pm-currency" disabled></div>
     </div>
+    <label class="f" for="pm-account">Paid from account</label>
+    <select id="pm-account" class="acct-select"></select>
     <label class="f" for="pm-note">Note</label>
     <input id="pm-note" placeholder="Optional">
     <div class="small muted" id="pm-rollnote" style="margin-top:8px"></div>
@@ -360,6 +477,8 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
     </div>
     <label class="f" for="pim-week">Week (Friday)</label>
     <select id="pim-week"></select>
+    <label class="f" for="pim-account">Account</label>
+    <select id="pim-account" class="acct-select"></select>
     <label class="f" for="pim-note">Note</label>
     <input id="pim-note" placeholder="Optional">
     <div id="pim-err" class="small" style="color:var(--red);margin-top:8px;display:none"></div>
@@ -386,6 +505,8 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
     </div>
     <label class="f" for="im-week">Week (Friday)</label>
     <select id="im-week"></select>
+    <label class="f" for="im-account">Into account</label>
+    <select id="im-account" class="acct-select"></select>
     <div id="im-err" class="small" style="color:var(--red);margin-top:8px;display:none"></div>
     <div class="btnrow">
       <button class="btn danger" id="im-del" style="margin-right:auto;display:none">Delete</button>
@@ -405,6 +526,136 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
     <div class="btnrow">
       <button class="btn ghost" data-close="cap-modal">Cancel</button>
       <button class="btn primary" id="cap-add">Add selected</button>
+    </div>
+  </div>
+</div>
+
+<!-- Debt modal -->
+<div class="modal-wrap" id="debt-modal">
+  <div class="modal">
+    <h3 id="dm-title">Add debt</h3>
+    <label class="f" for="dm-name">Name</label>
+    <input id="dm-name" placeholder="e.g. Barclaycard">
+    <div class="inline2">
+      <div><label class="f" for="dm-type">Type</label>
+        <select id="dm-type">
+          <option value="credit_card">Credit card</option>
+          <option value="loan">Loan</option>
+          <option value="informal">Informal / family</option>
+        </select></div>
+      <div><label class="f" for="dm-lender">Lender</label>
+        <input id="dm-lender" placeholder="Optional"></div>
+    </div>
+    <div class="inline2">
+      <div><label class="f" for="dm-owner-member">In whose name</label>
+        <select id="dm-owner-member"></select></div>
+      <div><label class="f" for="dm-owner-name">Or business name</label>
+        <input id="dm-owner-name" placeholder="e.g. Farm Ltd"></div>
+    </div>
+    <div class="inline2">
+      <div><label class="f" for="dm-principal">Original amount</label>
+        <input id="dm-principal" type="number" inputmode="decimal" step="0.01" min="0"></div>
+      <div><label class="f" for="dm-balance">Current balance</label>
+        <input id="dm-balance" type="number" inputmode="decimal" step="0.01" min="0"></div>
+    </div>
+    <div class="inline2">
+      <div><label class="f" for="dm-currency">Currency</label>
+        <select id="dm-currency"></select></div>
+      <div><label class="f" for="dm-rate">Interest rate (% APR)</label>
+        <input id="dm-rate" type="number" inputmode="decimal" step="0.1" min="0" value="0"></div>
+    </div>
+    <div class="inline2">
+      <div><label class="f" for="dm-minpay">Monthly payment</label>
+        <input id="dm-minpay" type="number" inputmode="decimal" step="0.01" min="0"></div>
+      <div><label class="f" for="dm-dueday">Due day of month</label>
+        <input id="dm-dueday" type="number" inputmode="numeric" min="1" max="31"></div>
+    </div>
+    <label class="f" for="dm-account">Linked account</label>
+    <select id="dm-account" class="acct-select"></select>
+    <label class="f" for="dm-notes">Notes</label>
+    <textarea id="dm-notes"></textarea>
+    <div id="dm-err" class="small" style="color:var(--red);margin-top:8px;display:none"></div>
+    <div class="btnrow">
+      <button class="btn ghost" data-close="debt-modal">Cancel</button>
+      <button class="btn primary" id="dm-save">Save debt</button>
+    </div>
+  </div>
+</div>
+
+<!-- Debt payment modal -->
+<div class="modal-wrap" id="dpay-modal">
+  <div class="modal">
+    <h3>Record debt payment</h3>
+    <p class="small muted" id="dp-name" style="margin-top:0"></p>
+    <div class="inline2">
+      <div><label class="f" for="dp-amount">Amount</label>
+        <input id="dp-amount" type="number" inputmode="decimal" step="0.01" min="0"></div>
+      <div><label class="f">Currency</label>
+        <input id="dp-currency" disabled></div>
+    </div>
+    <label class="f" for="dp-account">Paid from account</label>
+    <select id="dp-account" class="acct-select"></select>
+    <label class="f" for="dp-note">Note</label>
+    <input id="dp-note" placeholder="Optional">
+    <div class="small muted" id="dp-after" style="margin-top:8px"></div>
+    <div id="dp-err" class="small" style="color:var(--red);margin-top:8px;display:none"></div>
+    <div class="btnrow">
+      <button class="btn ghost" data-close="dpay-modal">Cancel</button>
+      <button class="btn primary" id="dp-save">Record payment</button>
+    </div>
+  </div>
+</div>
+
+<!-- Account modal -->
+<div class="modal-wrap" id="acct-modal">
+  <div class="modal">
+    <h3 id="am-title">Add account</h3>
+    <label class="f" for="am-name">Name</label>
+    <input id="am-name" placeholder="e.g. HSBC Current, M-Pesa, Petty cash">
+    <div class="inline2">
+      <div><label class="f" for="am-type">Type</label>
+        <select id="am-type">
+          <option value="bank">Bank</option><option value="cash">Cash</option>
+          <option value="mobile">Mobile money</option><option value="credit_card">Credit card</option>
+          <option value="intermediary">Intermediary / transit</option><option value="personal">Personal</option>
+        </select></div>
+      <div><label class="f" for="am-currency">Currency</label>
+        <select id="am-currency"></select></div>
+    </div>
+    <div class="inline2">
+      <div><label class="f" for="am-owner-member">Owned by member</label>
+        <select id="am-owner-member"></select></div>
+      <div><label class="f" for="am-owner-name">Or business name</label>
+        <input id="am-owner-name" placeholder="e.g. Farm Ltd"></div>
+    </div>
+    <label class="f" for="am-opening">Opening balance</label>
+    <input id="am-opening" type="number" inputmode="decimal" step="0.01" value="0">
+    <div id="am-err" class="small" style="color:var(--red);margin-top:8px;display:none"></div>
+    <div class="btnrow">
+      <button class="btn danger" id="am-archive" style="margin-right:auto;display:none">Archive</button>
+      <button class="btn ghost" data-close="acct-modal">Cancel</button>
+      <button class="btn primary" id="am-save">Save account</button>
+    </div>
+  </div>
+</div>
+
+<!-- Budget modal -->
+<div class="modal-wrap" id="bud-modal">
+  <div class="modal">
+    <h3 id="bud-title">Add budget</h3>
+    <label class="f" for="bud-category">Category</label>
+    <input id="bud-category" list="cat-list">
+    <div class="inline2">
+      <div><label class="f" for="bud-amount">Monthly limit</label>
+        <input id="bud-amount" type="number" inputmode="decimal" step="0.01" min="0"></div>
+      <div><label class="f" for="bud-currency">Currency</label>
+        <select id="bud-currency"></select></div>
+    </div>
+    <div id="bud-err" class="small" style="color:var(--red);margin-top:8px;display:none"></div>
+    <div class="btnrow">
+      <button class="btn danger" id="bud-del" style="margin-right:auto;display:none">Delete</button>
+      <button class="btn ghost" data-close="bud-modal">Cancel</button>
+      <button class="btn primary" id="bud-save">Save budget</button>
     </div>
   </div>
 </div>
@@ -456,7 +707,18 @@ var App = (function(){
     planItems: [],        // fam_planner_items rows for visible range
     editingItem: null,
     editingIncome: null,
-    capProposals: []
+    capProposals: [],
+    accounts: [],
+    debts: [],
+    debtPayments: [],
+    budgets: [],
+    editingDebt: null,
+    payingDebt: null,
+    editingAcct: null,
+    editingBudget: null,
+    sortBills: 'due_date',
+    sortExpenses: 'spent_at',
+    sortDebts: 'balance'
   };
 
   /* ---------------- utilities ---------------- */
@@ -545,6 +807,79 @@ var App = (function(){
     Object.keys(inc).forEach(function(c){ rem[c] = inc[c] - (out[c]||0); });
     Object.keys(out).forEach(function(c){ if(!(c in rem)) rem[c] = -out[c]; });
     return {out:out, inc:inc, rem:rem};
+  }
+
+  function accountName(id){
+    var a = state.accounts.find(function(x){ return x.id === id; });
+    return a ? a.name : '';
+  }
+  function accountLabel(a){
+    return a.name + ' (' + a.owner_name + ', ' + a.currency + ')';
+  }
+  // Running balance = opening + tagged income - tagged bill payments/expenses/debt payments
+  function accountBalance(id){
+    var a = state.accounts.find(function(x){ return x.id === id; });
+    if(!a) return 0;
+    var bal = Number(a.opening_balance) || 0;
+    state.income.forEach(function(i){ if(i.account_id === id) bal += Number(i.amount); });
+    state.payments.forEach(function(p){ if(p.account_id === id) bal -= Number(p.amount); });
+    state.expenses.forEach(function(x){ if(x.account_id === id) bal -= Number(x.amount); });
+    state.debtPayments.forEach(function(d){ if(d.account_id === id) bal -= Number(d.amount); });
+    return bal;
+  }
+  // Months to clear + total interest at a fixed monthly payment. null = never clears at that payment.
+  function payoffProjection(balance, aprPct, monthly){
+    balance = Number(balance); monthly = Number(monthly);
+    if(!(balance > 0) || !(monthly > 0)) return null;
+    var r = (Number(aprPct) || 0) / 100 / 12;
+    if(r === 0){ var m0 = Math.ceil(balance / monthly); return {months:m0, interest:0}; }
+    if(monthly <= balance * r) return null; // payment doesn't cover interest
+    var n = Math.ceil(Math.log(monthly / (monthly - balance * r)) / Math.log(1 + r));
+    return {months:n, interest: Math.max(0, n * monthly - balance)};
+  }
+  // Monthly close: income vs (bill payments + expenses) vs debt paid, per currency
+  function monthlyClose(ym){
+    var inc = {}, out = {}, debt = {};
+    function bump(o,c,v){ o[c] = (o[c]||0) + Number(v); }
+    state.income.forEach(function(i){ if(i.week_date && i.week_date.slice(0,7) === ym) bump(inc, i.currency, i.amount); });
+    state.payments.forEach(function(p){ if(p.paid_at.slice(0,7) === ym) bump(out, p.currency, p.amount); });
+    state.expenses.forEach(function(x){ if(x.spent_at.slice(0,7) === ym) bump(out, x.currency, x.amount); });
+    state.debtPayments.forEach(function(d){ if(d.paid_at.slice(0,7) === ym) bump(debt, d.currency, d.amount); });
+    var net = {};
+    var ccys = {};
+    [inc,out,debt].forEach(function(o){ Object.keys(o).forEach(function(c){ ccys[c]=1; }); });
+    Object.keys(ccys).forEach(function(c){ net[c] = (inc[c]||0) - (out[c]||0) - (debt[c]||0); });
+    return {inc:inc, out:out, debt:debt, net:net};
+  }
+  function sortRows(rows, key){
+    var num = {amount:1, balance:1, interest_rate:1, due_day:1};
+    return rows.slice().sort(function(a,b){
+      var av, bv;
+      if(key === 'account'){ av = accountName(a.account_id).toLowerCase(); bv = accountName(b.account_id).toLowerCase(); }
+      else if(key === 'responsible'){ av = memberName(a.responsible).toLowerCase(); bv = memberName(b.responsible).toLowerCase(); }
+      else { av = a[key]; bv = b[key]; }
+      if(num[key]) return (Number(bv)||0) - (Number(av)||0); // numeric: biggest first
+      av = String(av == null ? '' : av).toLowerCase(); bv = String(bv == null ? '' : bv).toLowerCase();
+      return av < bv ? -1 : av > bv ? 1 : 0;
+    });
+  }
+  function toCSV(rows, cols){
+    var head = cols.map(function(c){ return c.label; }).join(',');
+    var body = rows.map(function(r){
+      return cols.map(function(c){
+        var v = typeof c.get === 'function' ? c.get(r) : r[c.get];
+        v = v == null ? '' : String(v);
+        return /[",\n]/.test(v) ? '"' + v.replace(/"/g,'""') + '"' : v;
+      }).join(',');
+    }).join('\n');
+    return head + '\n' + body;
+  }
+  function downloadCSV(name, csv){
+    var blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 500);
   }
 
   function memberName(id){
@@ -669,6 +1004,26 @@ var App = (function(){
       state.income = []; state.planItems = [];
     });
   }
+  function loadAccounts(){
+    return apiJSON('/rest/v1/fam_accounts?select=*&archived=eq.false&order=name.asc')
+      .then(function(r){ state.accounts = r || []; })
+      .catch(function(){ state.accounts = []; });
+  }
+  function loadDebts(){
+    return apiJSON('/rest/v1/fam_debts?select=*&archived=eq.false&order=balance.desc')
+      .then(function(r){ state.debts = r || []; })
+      .catch(function(){ state.debts = []; });
+  }
+  function loadDebtPayments(){
+    return apiJSON('/rest/v1/fam_debt_payments?select=*&order=paid_at.desc&limit=200')
+      .then(function(r){ state.debtPayments = r || []; })
+      .catch(function(){ state.debtPayments = []; });
+  }
+  function loadBudgets(){
+    return apiJSON('/rest/v1/fam_budgets?select=*&order=category.asc')
+      .then(function(r){ state.budgets = r || []; })
+      .catch(function(){ state.budgets = []; });
+  }
   function loadRates(){
     try{
       var cached = JSON.parse(localStorage.getItem('fm_rates') || 'null');
@@ -714,7 +1069,7 @@ var App = (function(){
 
   function setView(v){
     state.view = v;
-    ['dashboard','bills','expenses','planner'].forEach(function(name){
+    ['dashboard','bills','expenses','planner','debts','analysis','admin'].forEach(function(name){
       $('view-' + name).style.display = (name === v && state.isMember) ? '' : 'none';
     });
     document.querySelectorAll('#tabs button').forEach(function(b){
@@ -734,7 +1089,8 @@ var App = (function(){
       '<div class="small muted">' + esc(fmtDate(b.due_date)) + ' · ' +
         '<span class="' + (od ? 'overdue' : '') + '">' + esc(when) + '</span> · ' +
         esc(b.category || 'General') +
-        (b.responsible ? ' · ' + esc(memberName(b.responsible)) : '') + '</div>' +
+        (b.responsible ? ' · ' + esc(memberName(b.responsible)) : '') +
+        (b.account_id ? ' · ' + esc(accountName(b.account_id)) : '') + '</div>' +
       '<div class="list-actions">' +
         '<button class="linkbtn" data-act="paid" data-id="' + esc(b.id) + '">Mark paid</button>' +
         '<button class="linkbtn" data-act="edit" data-id="' + esc(b.id) + '">Edit</button>' +
@@ -750,7 +1106,7 @@ var App = (function(){
   function renderBills(){
     var el = $('bills-list');
     if(!state.bills.length){ el.innerHTML = '<div class="empty">No bills yet. Add the first one.</div>'; return; }
-    el.innerHTML = state.bills.map(billRow).join('');
+    el.innerHTML = sortRows(state.bills, state.sortBills).map(billRow).join('');
   }
 
   function renderPayments(){
@@ -769,9 +1125,10 @@ var App = (function(){
     var el = $('expenses-list');
     if(!state.expenses.length){ el.innerHTML = '<div class="empty">No expenses in the last 60 days.</div>'; return; }
     var uid = state.session.user.id;
-    el.innerHTML = state.expenses.map(function(x){
+    el.innerHTML = sortRows(state.expenses, state.sortExpenses).map(function(x){
       return '<div class="item"><div><div><strong>' + esc(x.category || 'General') + '</strong></div>' +
         '<div class="small muted">' + esc(fmtDate(x.spent_at)) + ' · ' + esc(memberName(x.spent_by)) +
+        (x.account_id ? ' · ' + esc(accountName(x.account_id)) : '') +
         (x.note ? ' · ' + esc(x.note) : '') + '</div>' +
         '<div class="list-actions">' +
           (x.receipt_path ? '<button class="linkbtn" data-act="receipt" data-path="' + esc(x.receipt_path) + '">Receipt</button>' : '') +
@@ -966,6 +1323,7 @@ var App = (function(){
     $('pim-amount').value = item ? item.amount : '';
     $('pim-currency').value = item ? item.currency : 'GBP';
     fillWeekSelect('pim-week', item ? item.week_date : week);
+    $('pim-account').value = item && item.account_id ? item.account_id : '';
     $('pim-note').value = item ? (item.note || '') : '';
     $('pim-del').style.display = item ? '' : 'none';
     $('pim-err').style.display = 'none';
@@ -976,7 +1334,8 @@ var App = (function(){
     var errEl = $('pim-err');
     if(!title || !(amount >= 0)){ errEl.textContent = 'Title and a valid amount are required.'; errEl.style.display=''; return; }
     var body = {title:title, amount:amount, currency:$('pim-currency').value,
-      week_date:$('pim-week').value, note:($('pim-note').value.trim() || null)};
+      week_date:$('pim-week').value, note:($('pim-note').value.trim() || null),
+      account_id:($('pim-account').value || null)};
     var p = state.editingItem
       ? apiJSON('/rest/v1/fam_planner_items?id=eq.' + state.editingItem.id, {method:'PATCH', body:JSON.stringify(body)})
       : apiJSON('/rest/v1/fam_planner_items', {method:'POST', headers:{'Prefer':'return=minimal'}, body:JSON.stringify(body)});
@@ -1002,7 +1361,8 @@ var App = (function(){
     var person = $('im-person').value.trim(), amount = parseFloat($('im-amount').value);
     var errEl = $('im-err');
     if(!person || !(amount >= 0)){ errEl.textContent = 'Person and a valid amount are required.'; errEl.style.display=''; return; }
-    var body = {person:person, amount:amount, currency:$('im-currency').value, week_date:$('im-week').value};
+    var body = {person:person, amount:amount, currency:$('im-currency').value, week_date:$('im-week').value,
+      account_id:($('im-account').value || null)};
     var p = state.editingIncome
       ? apiJSON('/rest/v1/fam_income?id=eq.' + state.editingIncome.id, {method:'PATCH', body:JSON.stringify(body)})
       : apiJSON('/rest/v1/fam_income', {method:'POST', headers:{'Prefer':'return=minimal'}, body:JSON.stringify(body)});
@@ -1087,8 +1447,395 @@ var App = (function(){
     }).then(function(){ btn.disabled = false; });
   }
 
+  /* ---------------- accounts / owner selects ---------------- */
+  function fillAccountSelects(){
+    document.querySelectorAll('select.acct-select').forEach(function(el){
+      var cur = el.value;
+      el.innerHTML = '<option value="">— No account —</option>';
+      state.accounts.forEach(function(a){
+        var o = document.createElement('option'); o.value = a.id; o.textContent = accountLabel(a);
+        el.appendChild(o);
+      });
+      if(cur) el.value = cur;
+    });
+  }
+  function fillOwnerSelect(id){
+    var el = $(id); el.innerHTML = '<option value="">— Not a member —</option>';
+    state.members.forEach(function(m){
+      var o = document.createElement('option'); o.value = m.user_id; o.textContent = memberName(m.user_id);
+      el.appendChild(o);
+    });
+  }
+
+  /* ---------------- debts ---------------- */
+  function renderDebts(){
+    var el = $('debts-list');
+    var rows = sortRows(state.debts, state.sortDebts);
+    if(!rows.length){ el.innerHTML = '<div class="empty">No debts recorded. Long may it last — add credit cards and loans so the full position is visible.</div>'; return; }
+    el.innerHTML = rows.map(function(d){
+      var proj = payoffProjection(d.balance, d.interest_rate, d.min_payment);
+      var projTxt = !Number(d.balance) ? 'Cleared'
+        : proj === null && Number(d.min_payment) > 0 ? 'Payment does not cover interest — balance will grow'
+        : proj ? ('Clears in ~' + proj.months + ' months' + (proj.interest > 0.5 ? ' (' + fmtMoney(proj.interest, d.currency) + ' interest)' : ''))
+        : 'Set a monthly payment to see the payoff date';
+      var typeLabel = d.debt_type === 'credit_card' ? 'Credit card' : d.debt_type === 'informal' ? 'Informal' : 'Loan';
+      return '<div class="item"><div>' +
+        '<div><strong>' + esc(d.name) + '</strong><span class="badge">' + esc(typeLabel) + '</span>' +
+          (proj === null && Number(d.min_payment) > 0 && Number(d.balance) > 0 ? '<span class="badge red">Growing</span>' : '') + '</div>' +
+        '<div class="small muted">' + esc(d.owner_name) + (d.lender ? ' · ' + esc(d.lender) : '') +
+          (Number(d.interest_rate) ? ' · ' + esc(String(d.interest_rate)) + '% APR' : '') +
+          (d.due_day ? ' · due day ' + esc(String(d.due_day)) : '') + '</div>' +
+        '<div class="small muted">' + esc(projTxt) + '</div>' +
+        '<div class="list-actions">' +
+          '<button class="linkbtn" data-act="dpay" data-id="' + esc(d.id) + '">Record payment</button>' +
+          '<button class="linkbtn" data-act="dedit" data-id="' + esc(d.id) + '">Edit</button>' +
+          (state.isAdmin ? '<button class="linkbtn red" data-act="ddel" data-id="' + esc(d.id) + '">Delete</button>' : '') +
+        '</div></div>' +
+        '<div style="text-align:right"><div class="amount' + (Number(d.balance) > 0 ? ' overdue' : '') + '">' + esc(fmtMoney(d.balance, d.currency)) + '</div>' +
+        '<div class="small muted">of ' + esc(fmtMoney(d.principal, d.currency)) + '</div></div></div>';
+    }).join('');
+  }
+  function renderDebtPayments(){
+    var el = $('debt-payments-list');
+    var rows = state.debtPayments.slice(0, 20);
+    if(!rows.length){ el.innerHTML = '<div class="empty">No debt payments recorded yet.</div>'; return; }
+    el.innerHTML = rows.map(function(p){
+      return '<div class="item"><div><div><strong>' + esc(p.debt_name) + '</strong></div>' +
+        '<div class="small muted">' + esc(fmtDate(p.paid_at.slice(0,10))) + ' · ' + esc(memberName(p.paid_by)) +
+        (p.account_id ? ' · from ' + esc(accountName(p.account_id)) : '') + '</div></div>' +
+        '<div class="amount">' + esc(fmtMoney(p.amount, p.currency)) + '</div></div>';
+    }).join('');
+  }
+  function renderNetPosition(){
+    var el = $('d-debts'); if(!el) return;
+    if(!state.debts.length){ el.innerHTML = '<div class="empty">No debts recorded.</div>'; return; }
+    var byOwner = {};
+    state.debts.forEach(function(d){
+      if(!(Number(d.balance) > 0)) return;
+      byOwner[d.owner_name] = byOwner[d.owner_name] || {};
+      byOwner[d.owner_name][d.currency] = (byOwner[d.owner_name][d.currency] || 0) + Number(d.balance);
+    });
+    var thisM = todayISO().slice(0,7), paidDown = {};
+    state.debtPayments.forEach(function(p){
+      if(p.paid_at.slice(0,7) === thisM) paidDown[p.currency] = (paidDown[p.currency]||0) + Number(p.amount);
+    });
+    var owners = Object.keys(byOwner);
+    el.innerHTML = (owners.length ? owners.map(function(o){
+      var parts = Object.keys(byOwner[o]).map(function(c){ return fmtMoney(byOwner[o][c], c); }).join(' · ');
+      return '<div class="item"><div><strong>' + esc(o) + '</strong></div><div class="amount overdue">' + esc(parts) + '</div></div>';
+    }).join('') : '<div class="empty">All debts cleared.</div>') +
+    (Object.keys(paidDown).length ? '<div class="item"><div class="muted small">Paid down this month</div><div class="amount" style="color:var(--green)">' +
+      esc(Object.keys(paidDown).map(function(c){ return fmtMoney(paidDown[c], c); }).join(' · ')) + '</div></div>' : '');
+  }
+
+  function openDebtModal(d){
+    state.editingDebt = d || null;
+    fillOwnerSelect('dm-owner-member'); fillAccountSelects();
+    $('dm-title').textContent = d ? 'Edit debt' : 'Add debt';
+    $('dm-name').value = d ? d.name : '';
+    $('dm-type').value = d ? d.debt_type : 'credit_card';
+    $('dm-lender').value = d ? (d.lender || '') : '';
+    $('dm-owner-member').value = d && d.owner_member ? d.owner_member : '';
+    $('dm-owner-name').value = d && !d.owner_member ? d.owner_name : '';
+    $('dm-principal').value = d ? d.principal : '';
+    $('dm-balance').value = d ? d.balance : '';
+    $('dm-currency').value = d ? d.currency : 'GBP';
+    $('dm-rate').value = d ? d.interest_rate : 0;
+    $('dm-minpay').value = d ? d.min_payment : '';
+    $('dm-dueday').value = d && d.due_day ? d.due_day : '';
+    $('dm-account').value = d && d.account_id ? d.account_id : '';
+    $('dm-notes').value = d ? (d.notes || '') : '';
+    $('dm-err').style.display = 'none';
+    modalOpen('debt-modal');
+  }
+  function saveDebt(){
+    var name = $('dm-name').value.trim(), balance = parseFloat($('dm-balance').value);
+    var errEl = $('dm-err');
+    if(!name || !(balance >= 0)){ errEl.textContent = 'Name and a current balance are required.'; errEl.style.display=''; return; }
+    var ownerMember = $('dm-owner-member').value || null;
+    var ownerName = ownerMember ? memberName(ownerMember) : ($('dm-owner-name').value.trim() || 'Family');
+    var dd = parseInt($('dm-dueday').value, 10);
+    var body = {
+      name:name, debt_type:$('dm-type').value, lender:($('dm-lender').value.trim() || null),
+      owner_member:ownerMember, owner_name:ownerName,
+      principal:parseFloat($('dm-principal').value) || balance, balance:balance,
+      currency:$('dm-currency').value, interest_rate:parseFloat($('dm-rate').value) || 0,
+      min_payment:parseFloat($('dm-minpay').value) || 0,
+      due_day:(dd >= 1 && dd <= 31) ? dd : null,
+      account_id:($('dm-account').value || null), notes:($('dm-notes').value.trim() || null),
+      updated_at:new Date().toISOString()
+    };
+    var p = state.editingDebt
+      ? apiJSON('/rest/v1/fam_debts?id=eq.' + state.editingDebt.id, {method:'PATCH', body:JSON.stringify(body)})
+      : apiJSON('/rest/v1/fam_debts', {method:'POST', headers:{'Prefer':'return=minimal'}, body:JSON.stringify(body)});
+    p.then(function(){ modalClose('debt-modal'); toast('Debt saved.'); return loadDebts().then(function(){ renderDebts(); renderNetPosition(); }); })
+     .catch(function(e){ errEl.textContent = e.message; errEl.style.display=''; });
+  }
+
+  function openDebtPayModal(d){
+    state.payingDebt = d;
+    fillAccountSelects();
+    $('dp-name').textContent = d.name + ' — balance ' + fmtMoney(d.balance, d.currency);
+    $('dp-amount').value = d.min_payment || '';
+    $('dp-currency').value = d.currency;
+    $('dp-note').value = ''; $('dp-account').value = d.account_id || '';
+    $('dp-after').textContent = '';
+    $('dp-err').style.display = 'none';
+    modalOpen('dpay-modal');
+  }
+  function saveDebtPayment(){
+    var d = state.payingDebt, amount = parseFloat($('dp-amount').value);
+    var errEl = $('dp-err');
+    if(!(amount > 0)){ errEl.textContent = 'Enter a valid amount.'; errEl.style.display=''; return; }
+    var btn = $('dp-save'); btn.disabled = true;
+    var newBal = Math.max(0, Number(d.balance) - amount);
+    apiJSON('/rest/v1/fam_debt_payments', {method:'POST', headers:{'Prefer':'return=minimal'}, body:JSON.stringify({
+      debt_id:d.id, debt_name:d.name, amount:amount, currency:d.currency,
+      paid_by:state.session.user.id, account_id:($('dp-account').value || null),
+      note:($('dp-note').value.trim() || null)
+    })}).then(function(){
+      return apiJSON('/rest/v1/fam_debts?id=eq.' + d.id, {method:'PATCH',
+        body:JSON.stringify({balance:newBal, updated_at:new Date().toISOString()})});
+    }).then(function(){
+      modalClose('dpay-modal');
+      toast(newBal === 0 ? 'Debt cleared — well done.' : 'Payment recorded. New balance ' + fmtMoney(newBal, d.currency) + '.');
+      return Promise.all([loadDebts(), loadDebtPayments()]).then(function(){ renderDebts(); renderDebtPayments(); renderNetPosition(); });
+    }).catch(function(e){ errEl.textContent = e.message; errEl.style.display=''; })
+      .then(function(){ btn.disabled = false; });
+  }
+
+  /* ---------------- analysis ---------------- */
+  function renderAnalysis(){
+    // Monthly close, last 6 months
+    var months = [];
+    for(var i = 0; i < 6; i++){ months.push(shiftMonth(todayISO().slice(0,7), -i)); }
+    $('an-close').innerHTML = months.map(function(ym){
+      var c = monthlyClose(ym);
+      var ccys = Object.keys(c.net);
+      if(!ccys.length) return '';
+      return '<div class="item"><div><strong>' + esc(monthLabel(ym)) + '</strong>' +
+        '<div class="small muted">In ' + esc(Object.keys(c.inc).map(function(k){ return fmtMoney(c.inc[k],k); }).join(' · ') || '—') +
+        ' · Out ' + esc(Object.keys(c.out).map(function(k){ return fmtMoney(c.out[k],k); }).join(' · ') || '—') +
+        ' · Debt paid ' + esc(Object.keys(c.debt).map(function(k){ return fmtMoney(c.debt[k],k); }).join(' · ') || '—') + '</div></div>' +
+        '<div class="amount">' + ccys.map(function(k){
+          var v = c.net[k];
+          return '<span class="' + (v >= 0 ? '' : 'overdue') + '">' + esc((v >= 0 ? '+' : '−') + fmtMoney(Math.abs(v), k)) + '</span>';
+        }).join(' · ') + '</div></div>';
+    }).join('') || '<div class="empty">No activity recorded yet.</div>';
+
+    // Monthly totals (bills paid + expenses) per currency
+    var mt = {};
+    state.payments.concat(state.expenses.map(function(x){ return {paid_at:x.spent_at, amount:x.amount, currency:x.currency}; }))
+      .forEach(function(p){
+        var ym = p.paid_at.slice(0,7);
+        if(months.indexOf(ym) < 0) return;
+        mt[ym] = mt[ym] || {};
+        mt[ym][p.currency] = (mt[ym][p.currency]||0) + Number(p.amount);
+      });
+    $('an-monthly').innerHTML = months.filter(function(m){ return mt[m]; }).map(function(m){
+      return '<div class="item"><div><strong>' + esc(monthLabel(m)) + '</strong></div><div class="amount">' +
+        esc(Object.keys(mt[m]).map(function(c){ return fmtMoney(mt[m][c], c); }).join(' · ')) + '</div></div>';
+    }).join('') || '<div class="empty">Nothing yet.</div>';
+
+    // Category breakdown, last 90 days
+    var from = new Date(Date.now() - 90*86400000).toISOString().slice(0,10);
+    var cats = {};
+    state.expenses.forEach(function(x){ if(x.spent_at >= from){ cats[x.category] = cats[x.category] || {}; cats[x.category][x.currency] = (cats[x.category][x.currency]||0) + Number(x.amount); } });
+    state.payments.forEach(function(p){
+      if(p.paid_at.slice(0,10) < from) return;
+      var bill = state.bills.find(function(b){ return b.id === p.bill_id; });
+      var cat = bill ? bill.category : 'Bills';
+      cats[cat] = cats[cat] || {}; cats[cat][p.currency] = (cats[cat][p.currency]||0) + Number(p.amount);
+    });
+    var ck = Object.keys(cats).sort();
+    $('an-cats').innerHTML = ck.length ? ck.map(function(c){
+      return '<div class="item"><div><strong>' + esc(c) + '</strong></div><div class="amount">' +
+        esc(Object.keys(cats[c]).map(function(k){ return fmtMoney(cats[c][k], k); }).join(' · ')) + '</div></div>';
+    }).join('') : '<div class="empty">Nothing in the last 90 days.</div>';
+
+    // Budgets vs actual (this month)
+    var thisM = todayISO().slice(0,7), actual = {};
+    state.expenses.forEach(function(x){ if(x.spent_at.slice(0,7) === thisM){ var k = x.category + '|' + x.currency; actual[k] = (actual[k]||0) + Number(x.amount); } });
+    state.payments.forEach(function(p){
+      if(p.paid_at.slice(0,7) !== thisM) return;
+      var bill = state.bills.find(function(b){ return b.id === p.bill_id; });
+      var k = (bill ? bill.category : 'Bills') + '|' + p.currency;
+      actual[k] = (actual[k]||0) + Number(p.amount);
+    });
+    $('an-budgets').innerHTML = state.budgets.length ? state.budgets.map(function(b){
+      var a = actual[b.category + '|' + b.currency] || 0;
+      var pct = b.amount > 0 ? Math.round(a / b.amount * 100) : 0;
+      var over = a > Number(b.amount);
+      return '<div class="item"><div><strong>' + esc(b.category) + '</strong>' + (over ? '<span class="badge red">Over</span>' : pct >= 85 ? '<span class="badge brass">Close</span>' : '') +
+        '<div class="small muted">' + pct + '% of ' + esc(fmtMoney(b.amount, b.currency)) + '</div></div>' +
+        '<div class="amount' + (over ? ' overdue' : '') + '">' + esc(fmtMoney(a, b.currency)) + '</div></div>';
+    }).join('') : '<div class="empty">No budgets set. Add them in Admin.</div>';
+  }
+
+  function exportCSV(kind){
+    var acc = function(r){ return accountName(r.account_id); };
+    var defs = {
+      bills: {rows:state.bills, cols:[{label:'Name',get:'name'},{label:'Amount',get:'amount'},{label:'Currency',get:'currency'},{label:'Due',get:'due_date'},{label:'Recurrence',get:'recurrence'},{label:'Category',get:'category'},{label:'Responsible',get:function(r){return memberName(r.responsible);}},{label:'Account',get:acc},{label:'Notes',get:'notes'}]},
+      payments: {rows:state.payments, cols:[{label:'Bill',get:'bill_name'},{label:'Amount',get:'amount'},{label:'Currency',get:'currency'},{label:'Paid by',get:function(r){return memberName(r.paid_by);}},{label:'Paid at',get:'paid_at'},{label:'Account',get:acc},{label:'Note',get:'note'}]},
+      expenses: {rows:state.expenses, cols:[{label:'Date',get:'spent_at'},{label:'Category',get:'category'},{label:'Amount',get:'amount'},{label:'Currency',get:'currency'},{label:'Spent by',get:function(r){return memberName(r.spent_by);}},{label:'Account',get:acc},{label:'Note',get:'note'}]},
+      debts: {rows:state.debts, cols:[{label:'Name',get:'name'},{label:'Type',get:'debt_type'},{label:'Owner',get:'owner_name'},{label:'Lender',get:'lender'},{label:'Principal',get:'principal'},{label:'Balance',get:'balance'},{label:'Currency',get:'currency'},{label:'APR %',get:'interest_rate'},{label:'Monthly payment',get:'min_payment'},{label:'Due day',get:'due_day'}]},
+      debt_payments: {rows:state.debtPayments, cols:[{label:'Debt',get:'debt_name'},{label:'Amount',get:'amount'},{label:'Currency',get:'currency'},{label:'Paid by',get:function(r){return memberName(r.paid_by);}},{label:'Paid at',get:'paid_at'},{label:'Account',get:acc},{label:'Note',get:'note'}]},
+      income: {rows:state.income, cols:[{label:'Person',get:'person'},{label:'Amount',get:'amount'},{label:'Currency',get:'currency'},{label:'Week',get:'week_date'},{label:'Account',get:acc}]}
+    };
+    var d = defs[kind]; if(!d) return;
+    downloadCSV('family-money-' + kind + '-' + todayISO() + '.csv', toCSV(d.rows, d.cols));
+  }
+
+  /* ---------------- admin ---------------- */
+  function renderAdmin(){
+    $('tab-admin').style.display = state.isAdmin ? '' : 'none';
+    if(!state.isAdmin) return;
+    $('ad-members').innerHTML = state.members.map(function(m){
+      return '<div class="item"><div><strong>' + esc(memberName(m.user_id)) + '</strong>' +
+        (m.role === 'admin' ? '<span class="badge brass">Admin</span>' : '') +
+        '<div class="small muted">' + esc((state.profiles[m.user_id]||{}).email || '') + '</div></div>' +
+        (m.role !== 'admin' ? '<button class="linkbtn red" data-act="memdel" data-id="' + esc(m.user_id) + '">Remove</button>' : '') +
+        '</div>';
+    }).join('');
+    $('ad-accounts').innerHTML = state.accounts.length ? state.accounts.map(function(a){
+      var bal = accountBalance(a.id);
+      return '<div class="item"><div><strong>' + esc(a.name) + '</strong><span class="badge">' + esc(a.acct_type.replace('_',' ')) + '</span>' +
+        '<div class="small muted">' + esc(a.owner_name) + ' · ' + esc(a.currency) + '</div>' +
+        '<div class="list-actions"><button class="linkbtn" data-act="acctedit" data-id="' + esc(a.id) + '">Edit</button></div></div>' +
+        '<div class="amount' + (bal < 0 ? ' overdue' : '') + '">' + esc(fmtMoney(bal, a.currency)) + '</div></div>';
+    }).join('') : '<div class="empty">No accounts yet.</div>';
+    $('ad-budgets').innerHTML = state.budgets.length ? state.budgets.map(function(b){
+      return '<div class="item"><div><strong>' + esc(b.category) + '</strong></div>' +
+        '<div style="display:flex;gap:10px;align-items:center"><span class="amount">' + esc(fmtMoney(b.amount, b.currency)) + '/mo</span>' +
+        '<button class="linkbtn" data-act="budedit" data-id="' + esc(b.id) + '">Edit</button></div></div>';
+    }).join('') : '<div class="empty">No budgets set.</div>';
+  }
+  function addMemberByEmail(){
+    var email = $('ad-mem-email').value.trim(), errEl = $('ad-mem-err');
+    errEl.style.display = 'none';
+    if(!email){ return; }
+    apiJSON('/rest/v1/profiles?select=id,email,display_name&email=ilike.' + encodeURIComponent(email))
+      .then(function(rows){
+        if(!rows || !rows.length) throw new Error('No account found with that email. Create it in your GTD console first.');
+        var p = rows[0]; state.profiles[p.id] = p;
+        return apiJSON('/rest/v1/fam_members', {method:'POST', headers:{'Prefer':'return=minimal,resolution=ignore-duplicates'},
+          body:JSON.stringify({user_id:p.id, role:'member'})});
+      })
+      .then(function(){ $('ad-mem-email').value = ''; toast('Member added.'); return loadMembers().then(renderAdmin); })
+      .catch(function(e){ errEl.textContent = e.message; errEl.style.display = ''; });
+  }
+  function openAcctModal(a){
+    state.editingAcct = a || null;
+    fillOwnerSelect('am-owner-member');
+    $('am-title').textContent = a ? 'Edit account' : 'Add account';
+    $('am-name').value = a ? a.name : '';
+    $('am-type').value = a ? a.acct_type : 'bank';
+    $('am-currency').value = a ? a.currency : 'GBP';
+    $('am-owner-member').value = a && a.owner_member ? a.owner_member : '';
+    $('am-owner-name').value = a && !a.owner_member ? a.owner_name : '';
+    $('am-opening').value = a ? a.opening_balance : 0;
+    $('am-archive').style.display = a ? '' : 'none';
+    $('am-err').style.display = 'none';
+    modalOpen('acct-modal');
+  }
+  function saveAcct(){
+    var name = $('am-name').value.trim(), errEl = $('am-err');
+    if(!name){ errEl.textContent = 'A name is required.'; errEl.style.display=''; return; }
+    var ownerMember = $('am-owner-member').value || null;
+    var body = {
+      name:name, acct_type:$('am-type').value, currency:$('am-currency').value,
+      owner_member:ownerMember,
+      owner_name: ownerMember ? memberName(ownerMember) : ($('am-owner-name').value.trim() || 'Family'),
+      opening_balance: parseFloat($('am-opening').value) || 0
+    };
+    var p = state.editingAcct
+      ? apiJSON('/rest/v1/fam_accounts?id=eq.' + state.editingAcct.id, {method:'PATCH', body:JSON.stringify(body)})
+      : apiJSON('/rest/v1/fam_accounts', {method:'POST', headers:{'Prefer':'return=minimal'}, body:JSON.stringify(body)});
+    p.then(function(){ modalClose('acct-modal'); toast('Account saved.'); return loadAccounts().then(function(){ fillAccountSelects(); renderAdmin(); }); })
+     .catch(function(e){ errEl.textContent = e.message; errEl.style.display=''; });
+  }
+  function openBudModal(b){
+    state.editingBudget = b || null;
+    $('bud-title').textContent = b ? 'Edit budget' : 'Add budget';
+    $('bud-category').value = b ? b.category : '';
+    $('bud-amount').value = b ? b.amount : '';
+    $('bud-currency').value = b ? b.currency : 'GBP';
+    $('bud-del').style.display = b ? '' : 'none';
+    $('bud-err').style.display = 'none';
+    modalOpen('bud-modal');
+  }
+  function saveBudget(){
+    var cat = $('bud-category').value.trim(), amount = parseFloat($('bud-amount').value);
+    var errEl = $('bud-err');
+    if(!cat || !(amount >= 0)){ errEl.textContent = 'Category and a valid amount are required.'; errEl.style.display=''; return; }
+    var body = {category:cat, amount:amount, currency:$('bud-currency').value};
+    var p = state.editingBudget
+      ? apiJSON('/rest/v1/fam_budgets?id=eq.' + state.editingBudget.id, {method:'PATCH', body:JSON.stringify(body)})
+      : apiJSON('/rest/v1/fam_budgets', {method:'POST', headers:{'Prefer':'return=minimal'}, body:JSON.stringify(body)});
+    p.then(function(){ modalClose('bud-modal'); return loadBudgets().then(function(){ renderAdmin(); renderAnalysis(); }); })
+     .catch(function(e){ errEl.textContent = e.message; errEl.style.display=''; });
+  }
+
+  /* ---------------- notifications ---------------- */
+  function urlB64ToUint8(b64){
+    var pad = '='.repeat((4 - b64.length % 4) % 4);
+    var base = (b64 + pad).replace(/-/g,'+').replace(/_/g,'/');
+    var raw = atob(base), out = new Uint8Array(raw.length);
+    for(var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+    return out;
+  }
+  function setupNotifCard(){
+    var card = $('notif-card'); if(!card) return;
+    var supported = ('Notification' in window) && ('serviceWorker' in navigator) && ('PushManager' in window);
+    card.style.display = (supported && Notification.permission !== 'granted') ? '' : 'none';
+  }
+  function enableNotifications(){
+    Notification.requestPermission().then(function(perm){
+      if(perm !== 'granted'){ toast('Notifications were not allowed.'); return; }
+      return navigator.serviceWorker.ready.then(function(reg){
+        return reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey:urlB64ToUint8(VAPID_PUBLIC)});
+      }).then(function(sub){
+        return apiJSON('/rest/v1/push_subscriptions', {method:'POST',
+          headers:{'Prefer':'return=minimal,resolution=merge-duplicates'},
+          body:JSON.stringify({user_id:state.session.user.id, subscription:sub.toJSON()})});
+      }).then(function(){ toast('Notifications enabled.'); setupNotifCard(); });
+    }).catch(function(e){ toast('Could not enable notifications: ' + e.message); });
+  }
+  function sendNotify(userId, title, body){
+    return apiJSON('/functions/v1/notify', {method:'POST',
+      body:JSON.stringify({user_id:userId, title:title, body:body, url:'https://money.forgiatus.com/'})})
+      .catch(function(){ /* best effort */ });
+  }
+  // On-open checks: bill due/overdue to responsible member; debt due-day reminders; deduped per day
+  function runDueChecks(){
+    var seen = {};
+    try{ seen = JSON.parse(localStorage.getItem('fm_notified') || '{}'); }catch(e){}
+    var today = todayISO(), changed = false;
+    function once(key, fn){ if(seen[key] === today) return; seen[key] = today; changed = true; fn(); }
+    state.bills.forEach(function(b){
+      if(b.archived || !b.responsible) return;
+      var du = daysUntil(b.due_date);
+      if(du < 0) once('od-' + b.id, function(){ sendNotify(b.responsible, 'Bill overdue', b.name + ' (' + fmtMoney(b.amount, b.currency) + ') was due ' + fmtDate(b.due_date) + '.'); });
+      else if(du <= 2) once('due-' + b.id + '-' + b.due_date, function(){ sendNotify(b.responsible, 'Bill due soon', b.name + ' (' + fmtMoney(b.amount, b.currency) + ') is due ' + fmtDate(b.due_date) + '.'); });
+    });
+    var dom = new Date().getDate();
+    state.debts.forEach(function(d){
+      if(!d.due_day || !(Number(d.balance) > 0)) return;
+      var gap = d.due_day - dom;
+      if(gap >= 0 && gap <= 2){
+        var target = d.owner_member || (state.members.find(function(m){ return m.role === 'admin'; }) || {}).user_id;
+        if(target) once('debt-' + d.id + '-' + today.slice(0,7), function(){
+          sendNotify(target, 'Debt payment due', d.name + ' payment' + (Number(d.min_payment) ? ' of ' + fmtMoney(d.min_payment, d.currency) : '') + ' is due on day ' + d.due_day + '.');
+        });
+      }
+    });
+    if(changed) localStorage.setItem('fm_notified', JSON.stringify(seen));
+  }
+
   function renderAll(){
     renderBills(); renderPayments(); renderExpenses(); renderDashboard(); renderPlanner();
+    renderDebts(); renderDebtPayments(); renderNetPosition(); renderAnalysis(); renderAdmin();
+    fillAccountSelects(); setupNotifCard();
   }
 
   /* ---------------- modals ---------------- */
@@ -1097,7 +1844,7 @@ var App = (function(){
   function modalClose(id){ $(id).classList.remove('open'); if(openModal === id) openModal = null; }
 
   function fillCurrencySelects(){
-    ['bm-currency','ex-currency','pim-currency','im-currency'].forEach(function(id){
+    ['bm-currency','ex-currency','pim-currency','im-currency','dm-currency','am-currency','bud-currency'].forEach(function(id){
       var el = $(id); if(!el || el.options.length) return;
       CURRENCIES.forEach(function(c){
         var o = document.createElement('option'); o.value = c; o.textContent = c; el.appendChild(o);
@@ -1123,6 +1870,7 @@ var App = (function(){
     $('bm-recurrence').value = bill ? bill.recurrence : 'monthly';
     $('bm-category').value = bill ? (bill.category || '') : '';
     $('bm-responsible').value = bill && bill.responsible ? bill.responsible : '';
+    $('bm-account').value = bill && bill.account_id ? bill.account_id : '';
     $('bm-notes').value = bill ? (bill.notes || '') : '';
     $('bm-receipt').value = '';
     $('bm-receipt-current').textContent = bill && bill.receipt_path ? 'A receipt is already attached; choosing a new file replaces it.' : '';
@@ -1147,6 +1895,7 @@ var App = (function(){
         name:name, amount:amount, currency:$('bm-currency').value, due_date:due,
         recurrence:$('bm-recurrence').value, category:($('bm-category').value.trim() || 'General'),
         responsible:($('bm-responsible').value || null), notes:($('bm-notes').value.trim() || null),
+        account_id:($('bm-account').value || null),
         receipt_path: receiptPath || null, updated_at: new Date().toISOString()
       };
       if(state.editingBill){
@@ -1167,6 +1916,7 @@ var App = (function(){
     $('pm-amount').value = bill.amount;
     $('pm-currency').value = bill.currency;
     $('pm-note').value = '';
+    $('pm-account').value = bill.account_id || '';
     $('pm-rollnote').textContent = bill.recurrence === 'none'
       ? 'One-off bill — it will be marked complete.'
       : 'Recurring — the next due date will be ' + fmtDate(nextDueDate(bill.due_date, bill.recurrence)) + '.';
@@ -1183,6 +1933,7 @@ var App = (function(){
     var payment = {
       bill_id:b.id, bill_name:b.name, amount:amount, currency:b.currency,
       paid_by: state.session.user.id, due_date:b.due_date,
+      account_id:($('pm-account').value || null),
       note:($('pm-note').value.trim() || null)
     };
     apiJSON('/rest/v1/fam_bill_payments', {method:'POST', headers:{'Prefer':'return=minimal'}, body:JSON.stringify(payment)})
@@ -1219,6 +1970,7 @@ var App = (function(){
         spent_by: state.session.user.id,
         spent_at: $('ex-date').value || todayISO(),
         note:($('ex-note').value.trim() || null),
+        account_id:($('ex-account').value || null),
         receipt_path: receiptPath
       };
       return apiJSON('/rest/v1/fam_expenses', {method:'POST', headers:{'Prefer':'return=minimal'}, body:JSON.stringify(body)});
@@ -1328,6 +2080,35 @@ var App = (function(){
       else if(kind === 'income') openIncomeModal(state.income.find(function(x){ return x.id === id; }));
       else if(kind === 'bill') openBillModal(state.bills.find(function(x){ return x.id === id; }));
     });
+    $('bills-sort').addEventListener('change', function(){ state.sortBills = this.value; renderBills(); });
+    $('ex-sort').addEventListener('change', function(){ state.sortExpenses = this.value; renderExpenses(); });
+    $('debt-sort').addEventListener('change', function(){ state.sortDebts = this.value; renderDebts(); });
+    $('debt-add-btn').addEventListener('click', function(){ openDebtModal(null); });
+    $('dm-save').addEventListener('click', saveDebt);
+    $('dp-save').addEventListener('click', saveDebtPayment);
+    $('acct-add-btn').addEventListener('click', function(){ openAcctModal(null); });
+    $('am-save').addEventListener('click', saveAcct);
+    $('am-archive').addEventListener('click', function(){
+      var a = state.editingAcct; if(!a) return;
+      askConfirm('Archive account', 'The account is hidden but its history is kept.', function(){
+        apiJSON('/rest/v1/fam_accounts?id=eq.' + a.id, {method:'PATCH', body:JSON.stringify({archived:true})})
+          .then(function(){ modalClose('acct-modal'); return loadAccounts().then(function(){ fillAccountSelects(); renderAdmin(); }); })
+          .catch(function(e){ toast(e.message); });
+      });
+    });
+    $('bud-add-btn').addEventListener('click', function(){ openBudModal(null); });
+    $('bud-save').addEventListener('click', saveBudget);
+    $('bud-del').addEventListener('click', function(){
+      var b = state.editingBudget; if(!b) return;
+      apiJSON('/rest/v1/fam_budgets?id=eq.' + b.id, {method:'DELETE'})
+        .then(function(){ modalClose('bud-modal'); return loadBudgets().then(function(){ renderAdmin(); renderAnalysis(); }); })
+        .catch(function(e){ toast(e.message); });
+    });
+    $('ad-mem-add').addEventListener('click', addMemberByEmail);
+    $('notif-btn').addEventListener('click', enableNotifications);
+    document.querySelectorAll('[data-csv]').forEach(function(b){
+      b.addEventListener('click', function(){ exportCSV(b.getAttribute('data-csv')); });
+    });
     // Delegated actions in lists
     document.querySelector('main').addEventListener('click', function(e){
       var b = e.target.closest('button[data-act]'); if(!b) return;
@@ -1339,6 +2120,24 @@ var App = (function(){
         askConfirm('Delete bill', 'This removes the bill (paid history is kept).', function(){
           apiJSON('/rest/v1/fam_bills?id=eq.' + id, {method:'DELETE'})
             .then(function(){ toast('Bill deleted.'); return loadBills().then(renderAll); })
+            .catch(function(err){ toast(err.message); });
+        });
+      }
+      else if(act === 'dpay'){ openDebtPayModal(state.debts.find(function(x){ return x.id === id; })); }
+      else if(act === 'dedit'){ openDebtModal(state.debts.find(function(x){ return x.id === id; })); }
+      else if(act === 'ddel'){
+        askConfirm('Delete debt', 'This removes the debt (payment history is kept).', function(){
+          apiJSON('/rest/v1/fam_debts?id=eq.' + id, {method:'DELETE'})
+            .then(function(){ toast('Debt deleted.'); return loadDebts().then(function(){ renderDebts(); renderNetPosition(); }); })
+            .catch(function(err){ toast(err.message); });
+        });
+      }
+      else if(act === 'acctedit'){ openAcctModal(state.accounts.find(function(x){ return x.id === id; })); }
+      else if(act === 'budedit'){ openBudModal(state.budgets.find(function(x){ return x.id === id; })); }
+      else if(act === 'memdel'){
+        askConfirm('Remove member', 'They lose access to the family space. Their history is kept.', function(){
+          apiJSON('/rest/v1/fam_members?user_id=eq.' + id, {method:'DELETE'})
+            .then(function(){ toast('Member removed.'); return loadMembers().then(renderAdmin); })
             .catch(function(err){ toast(err.message); });
         });
       }
@@ -1361,7 +2160,7 @@ var App = (function(){
         showApp(); // re-check membership banner
         if(!state.isMember){ setView('dashboard'); return; }
         setView(state.view);
-        return Promise.all([loadBills(), loadPayments(), loadExpenses(), loadPlanner()]).then(renderAll);
+        return Promise.all([loadBills(), loadPayments(), loadExpenses(), loadPlanner(), loadAccounts(), loadDebts(), loadDebtPayments(), loadBudgets()]).then(function(){ renderAll(); runDueChecks(); });
       })
       .catch(function(e){ toast(e.message); });
   }
@@ -1384,6 +2183,9 @@ var App = (function(){
     state:state, init:init, boot:boot, todayISO:todayISO,
     fridayOf:fridayOf, weeksOfMonth:weeksOfMonth, weekTotals:weekTotals, shiftMonth:shiftMonth,
     moveCard:moveCard, mapCaptureResponse:mapCaptureResponse, renderPlanner:renderPlanner,
+    accountBalance:accountBalance, payoffProjection:payoffProjection, monthlyClose:monthlyClose,
+    sortRows:sortRows, toCSV:toCSV, exportCSV:exportCSV, runDueChecks:runDueChecks, renderDebts:renderDebts,
+    renderAdmin:renderAdmin, renderAnalysis:renderAnalysis, accountName:accountName,
     VAPID_PUBLIC:VAPID_PUBLIC
   };
 })();

@@ -73,6 +73,25 @@ function mockFetch(url, opts){
     if(method === 'POST'){ DB.expenses.unshift(Object.assign({id:'e'+(DB.expenses.length+1)}, JSON.parse(opts.body))); return j(null,201); }
     if(method === 'DELETE'){ const id=/id=eq\.([^&]+)/.exec(url)[1]; DB.expenses = DB.expenses.filter(x=>x.id!==id); return j(null,204); }
   }
+  if(url.includes('/rest/v1/fam_accounts')){
+    if(method==='GET') return j(DB.accounts||[]);
+    if(method==='POST'){ DB.accounts=DB.accounts||[]; DB.accounts.push(Object.assign({id:'a'+(DB.accounts.length+1), archived:false}, JSON.parse(opts.body))); return j(null,201); }
+    if(method==='PATCH'){ const id=/id=eq\.([^&]+)/.exec(url)[1]; Object.assign((DB.accounts||[]).find(x=>x.id===id), JSON.parse(opts.body)); return j(null,204); }
+  }
+  if(url.includes('/rest/v1/fam_debt_payments')){
+    if(method==='GET') return j(DB.debtPayments||[]);
+    if(method==='POST'){ DB.debtPayments=DB.debtPayments||[]; DB.debtPayments.unshift(Object.assign({id:'dp'+(DB.debtPayments.length+1), paid_at:new Date().toISOString()}, JSON.parse(opts.body))); return j(null,201); }
+  }
+  if(url.includes('/rest/v1/fam_debts')){
+    if(method==='GET') return j((DB.debts||[]).filter(d=>!d.archived));
+    if(method==='POST'){ DB.debts=DB.debts||[]; DB.debts.push(Object.assign({id:'d'+(DB.debts.length+1), archived:false}, JSON.parse(opts.body))); return j(null,201); }
+    if(method==='PATCH'){ const id=/id=eq\.([^&]+)/.exec(url)[1]; Object.assign((DB.debts||[]).find(x=>x.id===id), JSON.parse(opts.body)); return j(null,204); }
+  }
+  if(url.includes('/rest/v1/fam_budgets')){
+    if(method==='GET') return j(DB.budgets||[]);
+    if(method==='POST'){ DB.budgets=DB.budgets||[]; DB.budgets.push(Object.assign({id:'bu'+(DB.budgets.length+1)}, JSON.parse(opts.body))); return j(null,201); }
+  }
+  if(url.includes('/functions/v1/notify')){ (DB.notifies=DB.notifies||[]).push(JSON.parse(opts.body)); return j({ok:true}); }
   if(url.includes('/rest/v1/fam_income')) return j([]);
   if(url.includes('/rest/v1/fam_planner_items')) return j([]);
   if(url.includes('frankfurter')) return j({base:'USD', rates:{GBP:0.8, EUR:0.9, ZAR:18.0}});
@@ -299,6 +318,93 @@ const wait = ms => new Promise(r=>setTimeout(r, ms));
     assert(props[0].week === '2023-05-26' && props[0].kind === 'item', 'due date mapped to Friday week, default outgoing');
     assert(props[1].kind === 'income', 'income direction detected');
     assert(props[2].currency === 'GBP', 'unknown currency falls back to GBP');
+  }
+
+
+  console.log('--- Debts: maths ---');
+  {
+    const dom = makeDom(); await wait(50);
+    const A = dom.window.App;
+    assert(A.payoffProjection(1000, 0, 100).months === 10, 'zero-interest payoff months');
+    const p = A.payoffProjection(1000, 24, 100);
+    assert(p.months === 12 && p.interest > 0, 'interest payoff longer with interest cost (12 mo at 24% APR)');
+    assert(A.payoffProjection(1000, 24, 15) === null, 'payment below interest = never clears');
+    assert(A.payoffProjection(0, 24, 100) === null, 'no balance = no projection');
+  }
+
+  console.log('--- Debts: render, payment reduces balance, net position ---');
+  {
+    DB.accounts = [{id:'a1', name:'HSBC', acct_type:'bank', owner_member:UID, owner_name:'Rodney', currency:'GBP', opening_balance:500, archived:false}];
+    DB.debts = [
+      {id:'d1', name:'Barclaycard', debt_type:'credit_card', lender:'Barclays', owner_member:UID, owner_name:'Rodney', principal:5000, balance:3000, currency:'GBP', interest_rate:24, min_payment:150, due_day:15, account_id:null, archived:false},
+      {id:'d2', name:'Farm loan', debt_type:'loan', lender:'AgriBank', owner_member:null, owner_name:'Farm Ltd', principal:20000, balance:12000, currency:'USD', interest_rate:8, min_payment:400, due_day:1, account_id:null, archived:false}
+    ];
+    DB.debtPayments = [];
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){ w.fetch = mockFetch;
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}})); }});
+    await wait(180);
+    const d = dom.window.document, A = dom.window.App;
+    d.querySelector('#tabs button[data-view="debts"]').click();
+    const dl = d.getElementById('debts-list').innerHTML;
+    assert(dl.includes('Barclaycard') && dl.includes('Farm Ltd'), 'debts render with owner names');
+    assert(dl.includes('Clears in ~'), 'payoff projection shown');
+    const np = d.getElementById('d-debts').innerHTML;
+    assert(np.includes('Rodney') && np.includes('Farm Ltd'), 'net position grouped by owner (member and business)');
+
+    // record a payment
+    d.querySelector('button[data-act="dpay"][data-id="d1"]').click();
+    assert(d.getElementById('dp-amount').value === '150', 'debt payment prefilled with monthly payment');
+    d.getElementById('dp-save').click(); await wait(120);
+    assert(DB.debts[0].balance === 2850, 'payment reduces debt balance');
+    assert(DB.debtPayments.length === 1 && DB.debtPayments[0].paid_by === UID, 'debt payment logged with who paid');
+
+    // admin tab visible for admin, accounts render with computed balance
+    assert(d.getElementById('tab-admin').style.display !== 'none', 'admin tab visible to admin');
+    d.querySelector('#tabs button[data-view="admin"]').click();
+    A.renderAdmin();
+    const aa = d.getElementById('ad-accounts').innerHTML;
+    assert(aa.includes('HSBC'), 'accounts listed in admin');
+    assert(d.getElementById('ad-members').innerHTML.includes('Rodney'), 'members listed in admin');
+
+    // account balance maths: opening 500 - 150 debt payment tagged? (payment had no account) => 500
+    assert(A.accountBalance('a1') === 500, 'untagged payments do not move account balance');
+    A.state.debtPayments[0].account_id = 'a1';
+    assert(A.accountBalance('a1') === 350, 'tagged debt payment reduces account balance');
+
+    // sorting
+    A.state.sortDebts = 'owner_name'; A.renderDebts();
+    const first = d.querySelector('#debts-list .item strong').textContent;
+    assert(first === 'Farm loan', 'debt sort by owner puts Farm Ltd first');
+    const sorted = A.sortRows(A.state.bills, 'amount');
+    assert(Number(sorted[0].amount) >= Number(sorted[sorted.length-1].amount), 'sortRows numeric biggest first');
+
+    // CSV
+    const csv = A.toCSV([{a:'x,y', b:'plain'}], [{label:'A',get:'a'},{label:'B',get:'b'}]);
+    assert(csv === 'A,B\n"x,y",plain', 'CSV escapes commas');
+
+    // due checks: bill overdue (b1 responsible UID2) triggers notify, deduped
+    DB.notifies = [];
+    dom.window.localStorage.removeItem('fm_notified');
+    A.state.bills.push({id:'bod', name:'Old rates', amount:50, currency:'GBP', due_date:'2020-01-01', recurrence:'none', responsible:UID2, archived:false});
+    A.runDueChecks();
+    assert(DB.notifies.some(n=>n.title==='Bill overdue'), 'overdue bill notifies responsible member');
+    const count = DB.notifies.length;
+    A.runDueChecks();
+    assert(DB.notifies.length === count, 'due checks deduped per day');
+  }
+
+  console.log('--- Monthly close ---');
+  {
+    const dom = makeDom(); await wait(50);
+    const A = dom.window.App;
+    const ym = A.todayISO().slice(0,7);
+    A.state.income = [{week_date: ym + '-05', amount:2000, currency:'GBP'}];
+    A.state.payments = [{paid_at: ym + '-06T10:00:00Z', amount:500, currency:'GBP'}];
+    A.state.expenses = [{spent_at: ym + '-07', amount:300, currency:'GBP'}];
+    A.state.debtPayments = [{paid_at: ym + '-08T10:00:00Z', amount:200, currency:'GBP'}];
+    const c = A.monthlyClose(ym);
+    assert(c.net.GBP === 1000, 'monthly close net = in - out - debt (2000-800-200)');
   }
 
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');
