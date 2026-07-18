@@ -95,6 +95,10 @@ function mockFetch(url, opts){
     if(method==='GET') return j(DB.snapshots||[]);
     if(method==='POST'){ DB.snapshots=(DB.snapshots||[]).concat(JSON.parse(opts.body)); return j(null,201); }
   }
+  if(url.includes('/rest/v1/fam_settings')){
+    if(method==='GET') return j(DB.settings||[]);
+    if(method==='POST'){ DB.settings=[{key:'manual_rates', value:JSON.parse(opts.body).value}]; return j(null,201); }
+  }
   if(url.includes('/functions/v1/notify')){ (DB.notifies=DB.notifies||[]).push(JSON.parse(opts.body)); return j({ok:true}); }
   if(url.includes('/rest/v1/fam_income')) return j([]);
   if(url.includes('/rest/v1/fam_planner_items')) return j([]);
@@ -468,6 +472,76 @@ const wait = ms => new Promise(r=>setTimeout(r, ms));
     // shared Family owner option present in owner selects
     d.getElementById('debt-add-btn').click();
     assert(d.getElementById('dm-owner-member').options[0].textContent.includes('Family (shared'), 'Family shared ownership option available');
+  }
+
+
+  console.log('--- PIN, recurring planner, manual rates ---');
+  {
+    DB.settings=[{key:'manual_rates', value:{ZWG:40}}];
+    DB.planner=[]; DB.income=[];
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){ w.fetch = mockFetch;
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}})); }});
+    await wait(200);
+    const d = dom.window.document, A = dom.window.App;
+
+    // Manual ZWG rate feeds approxUSD
+    assert(Math.abs(A.approxUSD(400,'ZWG') - 10) < 0.001, 'manual ZWG rate converts (400/40 = $10)');
+    assert(Math.abs(A.approxUSD(80,'GBP') - 100) < 0.01, 'frankfurter rates still preferred where available');
+
+    // PIN: none set -> not required
+    assert(A.pinRequired() === false, 'no PIN set means no lock');
+    const h = await A.hashPin('1234');
+    dom.window.localStorage.setItem('fm_pin', h);
+    dom.window.sessionStorage.removeItem('fm_pin_ok');
+    assert(A.pinRequired() === true, 'PIN set + fresh session requires unlock');
+    d.getElementById('pin-lock').classList.add('open');
+    d.getElementById('pin-input').value = '9999';
+    A.tryUnlock(); await wait(30);
+    assert(d.getElementById('pin-lock').classList.contains('open'), 'wrong PIN keeps the lock');
+    d.getElementById('pin-input').value = '1234';
+    A.tryUnlock(); await wait(30);
+    assert(!d.getElementById('pin-lock').classList.contains('open'), 'correct PIN unlocks');
+    assert(dom.window.sessionStorage.getItem('fm_pin_ok') === '1', 'unlock is per-session');
+
+    // Recurring planner week maths
+    assert(A.nextPlannerWeek('2023-04-07','weekly') === '2023-04-14', 'weekly recurrence +7d');
+    assert(A.nextPlannerWeek('2023-04-07','monthly') === '2023-05-05', 'monthly recurrence keeps first-Friday position');
+    assert(A.nextPlannerWeek('2023-06-30','monthly') === '2023-07-28', 'monthly clamps to last Friday when next month has fewer');
+  }
+
+  console.log('--- Recurring item: paid tick spawns next instance ---');
+  {
+    const iso = d => d.toISOString().slice(0,10);
+    DB.planner = null; DB.income = [];
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){
+        w.fetch = function(url, opts){
+          opts = opts || {};
+          if(url.includes('/rest/v1/fam_planner_items')){
+            if((opts.method||'GET')==='GET') return Promise.resolve({ok:true,status:200,text:()=>Promise.resolve(JSON.stringify(DB.planner||[])),json:()=>Promise.resolve(DB.planner||[])});
+            if(opts.method==='PATCH'){ const id=/id=eq\.([^&]+)/.exec(url)[1]; Object.assign(DB.planner.find(x=>x.id===id), JSON.parse(opts.body)); return Promise.resolve({ok:true,status:204,text:()=>Promise.resolve('')}); }
+            if(opts.method==='POST'){ DB.planner.push(Object.assign({id:'pl'+(DB.planner.length+1), paid:false}, JSON.parse(opts.body))); return Promise.resolve({ok:true,status:201,text:()=>Promise.resolve('')}); }
+          }
+          return mockFetch(url, opts);
+        };
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}}));
+      }});
+    await wait(150);
+    const d = dom.window.document, A = dom.window.App;
+    const w0 = A.weeksOfMonth(A.state.plMonth)[0];
+    DB.planner = [{id:'pl1', title:'Farm', amount:1000, currency:'GBP', week_date:w0, paid:false, recurrence:'weekly'}];
+    await A.boot(); await wait(120);
+    d.querySelector('button[data-act="ptick"][data-id="pl1"]').click();
+    await wait(150);
+    const next = A.nextPlannerWeek(w0,'weekly');
+    assert(DB.planner.some(x=>x.week_date===next && !x.paid && x.title==='Farm' && x.recurrence==='weekly'), 'paying a weekly item creates next week instance');
+    assert(DB.planner.find(x=>x.id==='pl1').paid === true, 'original instance stays as paid history');
+    d.querySelector('button[data-act="ptick"][data-id="pl1"]').click(); // untick
+    await wait(100);
+    d.querySelector('button[data-act="ptick"][data-id="pl1"]').click(); // re-tick
+    await wait(150);
+    assert(DB.planner.filter(x=>x.week_date===next && x.title==='Farm' && !x.paid).length === 1, 'no duplicate next instance on repeated ticks');
   }
 
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');

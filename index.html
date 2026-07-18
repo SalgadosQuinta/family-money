@@ -159,11 +159,38 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
   <p class="small muted" style="text-align:center">Accounts are created by the family admin.</p>
 </div>
 
+<div class="modal-wrap" id="pin-lock" style="z-index:90">
+  <div class="modal" style="max-width:320px;text-align:center">
+    <div class="eyebrow">Forgiatus</div>
+    <h3 style="margin:6px 0 2px">Enter PIN</h3>
+    <p class="small muted" id="pin-msg" style="margin-top:0">4 digits</p>
+    <input id="pin-input" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off"
+      style="text-align:center;font-size:24px;letter-spacing:12px;font-family:var(--mono)">
+    <div class="btnrow" style="justify-content:center"><button class="btn primary" id="pin-go" style="width:100%">Unlock</button></div>
+  </div>
+</div>
+
+<!-- PIN settings modal -->
+<div class="modal-wrap" id="pinset-modal">
+  <div class="modal" style="max-width:380px">
+    <h3>Finance PIN</h3>
+    <p class="small muted" style="margin-top:0">A 4-digit PIN asked for once per session on this device. A light lock for shared phones — not encryption.</p>
+    <label class="f" for="ps-pin">New PIN (leave blank to remove)</label>
+    <input id="ps-pin" type="password" inputmode="numeric" maxlength="4" autocomplete="off">
+    <div id="ps-err" class="small" style="color:var(--red);margin-top:8px;display:none"></div>
+    <div class="btnrow">
+      <button class="btn ghost" data-close="pinset-modal">Cancel</button>
+      <button class="btn primary" id="ps-save">Save</button>
+    </div>
+  </div>
+</div>
+
 <div id="app-view" style="display:none">
 <header>
   <div class="hrow">
     <div class="brand"><span class="eyebrow">Forgiatus</span><h1>Family Money</h1></div>
     <div style="display:flex;gap:6px">
+      <button class="iconbtn" id="pin-btn" title="Finance PIN">PIN</button>
       <button class="iconbtn" id="theme-btn" title="Toggle theme">◐</button>
       <button class="iconbtn" id="signout-btn" title="Sign out">Sign out</button>
     </div>
@@ -383,6 +410,15 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
       <div id="ad-accounts"></div>
     </div>
     <div class="panel">
+      <h2>Manual exchange rates</h2>
+      <p class="small muted" style="margin-top:0">ZWG has no public daily feed, so set the rate here for the indicative ≈USD figures. Update it whenever the street rate moves.</p>
+      <div class="inline2">
+        <div><label class="f" for="rate-zwg">ZWG per 1 USD</label>
+          <input id="rate-zwg" type="number" inputmode="decimal" step="0.01" min="0"></div>
+        <div style="align-self:end"><button class="btn" id="rate-save">Save rate</button></div>
+      </div>
+    </div>
+    <div class="panel">
       <div class="row"><h2>Category budgets</h2><button class="btn" id="bud-add-btn">Add budget</button></div>
       <div id="ad-budgets"></div>
     </div>
@@ -485,8 +521,16 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
       <div><label class="f" for="pim-currency">Currency</label>
         <select id="pim-currency"></select></div>
     </div>
-    <label class="f" for="pim-week">Week (Friday)</label>
-    <select id="pim-week"></select>
+    <div class="inline2">
+      <div><label class="f" for="pim-week">Week (Friday)</label>
+        <select id="pim-week"></select></div>
+      <div><label class="f" for="pim-recur">Repeats</label>
+        <select id="pim-recur">
+          <option value="none">One-off</option>
+          <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
+        </select></div>
+    </div>
     <label class="f" for="pim-account">Account</label>
     <select id="pim-account" class="acct-select"></select>
     <label class="f" for="pim-note">Note</label>
@@ -738,7 +782,8 @@ var App = (function(){
     sortBills: 'due_date',
     sortExpenses: 'spent_at',
     sortDebts: 'balance',
-    snapshots: []
+    snapshots: [],
+    settings: {}
   };
 
   /* ---------------- utilities ---------------- */
@@ -910,8 +955,10 @@ var App = (function(){
 
   function approxUSD(amount, ccy){
     if(ccy === 'USD') return Number(amount) || 0;
-    if(!state.rates || !state.rates.rates || !state.rates.rates[ccy]) return null; // ZWG not on frankfurter
-    return (Number(amount) || 0) / state.rates.rates[ccy];
+    if(state.rates && state.rates.rates && state.rates.rates[ccy]) return (Number(amount) || 0) / state.rates.rates[ccy];
+    var man = (state.settings && state.settings.manual_rates) || {};
+    if(man[ccy] > 0) return (Number(amount) || 0) / man[ccy]; // e.g. ZWG per USD set in Admin
+    return null;
   }
 
   /* ---------------- session + API ---------------- */
@@ -1043,6 +1090,14 @@ var App = (function(){
     return apiJSON('/rest/v1/fam_budgets?select=*&order=category.asc')
       .then(function(r){ state.budgets = r || []; })
       .catch(function(){ state.budgets = []; });
+  }
+  function loadSettings(){
+    return apiJSON('/rest/v1/fam_settings?select=key,value')
+      .then(function(rows){
+        state.settings = {};
+        (rows || []).forEach(function(r){ state.settings[r.key] = r.value; });
+      })
+      .catch(function(){ state.settings = {}; });
   }
   function loadRates(){
     try{
@@ -1260,7 +1315,7 @@ var App = (function(){
       }).join('');
       var itemCards = state.planItems.filter(function(i){ return i.week_date === w; }).map(function(i){
         return '<div class="card' + (i.paid ? ' paid' : '') + '" draggable="true" data-kind="item" data-id="' + esc(i.id) + '">' +
-          '<div class="crow"><span class="ctitle">' + esc(i.title) + '</span>' +
+          '<div class="crow"><span class="ctitle">' + esc(i.title) + (i.recurrence && i.recurrence !== 'none' ? ' <span class="badge brass">' + esc(i.recurrence) + '</span>' : '') + '</span>' +
           '<span class="amount">' + esc(fmtMoney(i.amount, i.currency)) + '</span></div>' +
           '<div class="cactions"><button class="paidtick' + (i.paid ? ' on' : '') + '" data-act="ptick" data-id="' + esc(i.id) + '">' +
           (i.paid ? 'Paid' : 'Mark paid') + '</button></div></div>';
@@ -1280,6 +1335,19 @@ var App = (function(){
     bindBoardDnD();
   }
 
+  function nextPlannerWeek(weekISO, recurrence){
+    if(recurrence === 'weekly'){
+      var d = new Date(weekISO + 'T00:00:00'); d.setDate(d.getDate() + 7); return isoOf(d);
+    }
+    if(recurrence === 'monthly'){
+      // same-position Friday next month, clamped to that month's Fridays
+      var ym = weekISO.slice(0,7);
+      var idx = weeksOfMonth(ym).indexOf(weekISO);
+      var next = weeksOfMonth(shiftMonth(ym, 1));
+      return next[Math.min(idx < 0 ? 0 : idx, next.length - 1)];
+    }
+    return weekISO;
+  }
   // Move a card to a different week (returns the PATCH promise)
   function moveCard(kind, id, weekISO){
     if(kind === 'item'){
@@ -1344,6 +1412,7 @@ var App = (function(){
     $('pim-amount').value = item ? item.amount : '';
     $('pim-currency').value = item ? item.currency : 'GBP';
     fillWeekSelect('pim-week', item ? item.week_date : week);
+    $('pim-recur').value = item ? (item.recurrence || 'none') : 'none';
     $('pim-account').value = item && item.account_id ? item.account_id : '';
     $('pim-note').value = item ? (item.note || '') : '';
     $('pim-del').style.display = item ? '' : 'none';
@@ -1356,6 +1425,7 @@ var App = (function(){
     if(!title || !(amount >= 0)){ errEl.textContent = 'Title and a valid amount are required.'; errEl.style.display=''; return; }
     var body = {title:title, amount:amount, currency:$('pim-currency').value,
       week_date:$('pim-week').value, note:($('pim-note').value.trim() || null),
+      recurrence:$('pim-recur').value,
       account_id:($('pim-account').value || null)};
     var p = state.editingItem
       ? apiJSON('/rest/v1/fam_planner_items?id=eq.' + state.editingItem.id, {method:'PATCH', body:JSON.stringify(body)})
@@ -1736,6 +1806,7 @@ var App = (function(){
   function renderAdmin(){
     $('tab-admin').style.display = state.isAdmin ? '' : 'none';
     if(!state.isAdmin) return;
+    if($('rate-zwg') && document.activeElement !== $('rate-zwg')) $('rate-zwg').value = ((state.settings.manual_rates || {}).ZWG) || '';
     $('ad-members').innerHTML = state.members.map(function(m){
       return '<div class="item"><div><strong>' + esc(memberName(m.user_id)) + '</strong>' +
         (m.role === 'admin' ? '<span class="badge brass">Admin</span>' : '') +
@@ -1878,6 +1949,54 @@ var App = (function(){
     if(changed) localStorage.setItem('fm_notified', JSON.stringify(seen));
   }
 
+  /* ---------------- PIN (per-device, per-session light lock) ---------------- */
+  function hashPin(pin){
+    var salt = 'fm-pin-v1:';
+    if(window.crypto && crypto.subtle && crypto.subtle.digest){
+      return crypto.subtle.digest('SHA-256', new TextEncoder().encode(salt + pin)).then(function(buf){
+        return Array.prototype.map.call(new Uint8Array(buf), function(b){ return b.toString(16).padStart(2,'0'); }).join('');
+      });
+    }
+    // Fallback (older engines/tests): djb2 — still only a light local deterrent
+    var h = 5381, str = salt + pin;
+    for(var i = 0; i < str.length; i++){ h = ((h << 5) + h + str.charCodeAt(i)) >>> 0; }
+    return Promise.resolve('djb2-' + h.toString(16));
+  }
+  function pinRequired(){
+    return !!localStorage.getItem('fm_pin') && sessionStorage.getItem('fm_pin_ok') !== '1';
+  }
+  function showPinLock(){
+    $('pin-lock').classList.add('open');
+    $('pin-input').value = '';
+    setTimeout(function(){ $('pin-input').focus(); }, 50);
+  }
+  function tryUnlock(){
+    var pin = $('pin-input').value;
+    if(!/^\d{4}$/.test(pin)){ $('pin-msg').textContent = 'Enter 4 digits'; return; }
+    hashPin(pin).then(function(h){
+      if(h === localStorage.getItem('fm_pin')){
+        sessionStorage.setItem('fm_pin_ok','1');
+        $('pin-lock').classList.remove('open');
+      } else {
+        $('pin-msg').textContent = 'Wrong PIN — try again';
+        $('pin-input').value = '';
+      }
+    });
+  }
+  function savePinSetting(){
+    var pin = $('ps-pin').value, errEl = $('ps-err');
+    if(pin === ''){
+      localStorage.removeItem('fm_pin'); sessionStorage.removeItem('fm_pin_ok');
+      modalClose('pinset-modal'); toast('PIN removed.'); return;
+    }
+    if(!/^\d{4}$/.test(pin)){ errEl.textContent = 'The PIN must be exactly 4 digits.'; errEl.style.display=''; return; }
+    hashPin(pin).then(function(h){
+      localStorage.setItem('fm_pin', h);
+      sessionStorage.setItem('fm_pin_ok','1');
+      modalClose('pinset-modal'); toast('PIN set for this device.');
+    });
+  }
+
   /* ---------------- net worth, snapshots & charts ---------------- */
   // Net worth per currency = account balances + asset values (asset-backed debts) - all debt balances
   function netWorth(){
@@ -1952,6 +2071,11 @@ var App = (function(){
       return '<div class="stat"><div class="eyebrow">' + esc(c) + '</div>' +
         '<div class="v" style="color:' + (nw[c] >= 0 ? 'var(--brass)' : 'var(--red)') + '">' + esc(fmtMoney(nw[c], c)) + '</div></div>';
     }).join('') : '<div class="empty" style="grid-column:1/-1">Add accounts and debts to see net worth.</div>';
+    if(ccys.length > 1){
+      var usdTot = 0, complete = true;
+      ccys.forEach(function(c){ var u = approxUSD(nw[c], c); if(u === null) complete = false; else usdTot += u; });
+      hl.innerHTML += '<div class="stat"><div class="eyebrow">≈ USD total</div><div class="v">' + esc(fmtMoney(usdTot,'USD')) + (complete ? '' : '*') + '</div></div>';
+    }
     // main chart: strongest-history currency
     var best = null, bestLen = 1;
     ccys.forEach(function(c){ var srs = seriesFor('networth','net',c); if(srs.length > bestLen){ best = c; bestLen = srs.length; } });
@@ -2145,6 +2269,10 @@ var App = (function(){
     });
     $('si-pass').addEventListener('keydown', function(e){ if(e.key === 'Enter') $('si-btn').click(); });
     $('signout-btn').addEventListener('click', signOut);
+    $('pin-btn').addEventListener('click', function(){ $('ps-pin').value=''; $('ps-err').style.display='none'; modalOpen('pinset-modal'); });
+    $('ps-save').addEventListener('click', savePinSetting);
+    $('pin-go').addEventListener('click', tryUnlock);
+    $('pin-input').addEventListener('keydown', function(e){ if(e.key === 'Enter') tryUnlock(); });
     $('theme-btn').addEventListener('click', function(){
       var cur = document.documentElement.getAttribute('data-theme') === 'light' ? '' : 'light';
       if(cur) document.documentElement.setAttribute('data-theme','light');
@@ -2208,7 +2336,20 @@ var App = (function(){
           var patch = it.paid ? {paid:false, paid_by:null, paid_at:null}
             : {paid:true, paid_by:state.session.user.id, paid_at:new Date().toISOString()};
           apiJSON('/rest/v1/fam_planner_items?id=eq.' + id, {method:'PATCH', body:JSON.stringify(patch)})
-            .then(function(){ Object.assign(it, patch); renderPlanner(); })
+            .then(function(){
+              Object.assign(it, patch);
+              if(patch.paid && it.recurrence && it.recurrence !== 'none'){
+                var nw = nextPlannerWeek(it.week_date, it.recurrence);
+                var exists = state.planItems.some(function(x){ return x.title === it.title && x.week_date === nw && !x.paid; });
+                if(!exists){
+                  return apiJSON('/rest/v1/fam_planner_items', {method:'POST', headers:{'Prefer':'return=minimal'},
+                    body:JSON.stringify({title:it.title, amount:it.amount, currency:it.currency, week_date:nw,
+                      recurrence:it.recurrence, account_id:it.account_id || null, note:it.note || null})})
+                    .then(function(){ return loadPlanner(); }).then(renderPlanner);
+                }
+              }
+              renderPlanner();
+            })
             .catch(function(err){ toast(err.message); });
           return;
         }
@@ -2247,6 +2388,16 @@ var App = (function(){
         .catch(function(e){ toast(e.message); });
     });
     $('ad-mem-add').addEventListener('click', addMemberByEmail);
+    $('rate-save').addEventListener('click', function(){
+      var v = parseFloat($('rate-zwg').value);
+      if(!(v > 0)){ toast('Enter a valid rate.'); return; }
+      var man = Object.assign({}, (state.settings && state.settings.manual_rates) || {}, {ZWG: v});
+      apiJSON('/rest/v1/fam_settings?on_conflict=key', {method:'POST',
+        headers:{'Prefer':'return=minimal,resolution=merge-duplicates'},
+        body:JSON.stringify({key:'manual_rates', value:man, updated_by:state.session.user.id, updated_at:new Date().toISOString()})})
+        .then(function(){ state.settings.manual_rates = man; toast('Rate saved.'); renderAll(); })
+        .catch(function(e){ toast(e.message); });
+    });
     $('notif-btn').addEventListener('click', enableNotifications);
     document.querySelectorAll('[data-csv]').forEach(function(b){
       b.addEventListener('click', function(){ exportCSV(b.getAttribute('data-csv')); });
@@ -2295,6 +2446,7 @@ var App = (function(){
 
   function boot(){
     showApp();
+    if(pinRequired()) showPinLock();
     $('ex-date').value = todayISO();
     fillCurrencySelects();
     return Promise.all([loadMembers(), loadRates()])
@@ -2302,7 +2454,7 @@ var App = (function(){
         showApp(); // re-check membership banner
         if(!state.isMember){ setView('dashboard'); return; }
         setView(state.view);
-        return Promise.all([loadBills(), loadPayments(), loadExpenses(), loadPlanner(), loadAccounts(), loadDebts(), loadDebtPayments(), loadBudgets(), loadSnapshots()]).then(function(){ return takeSnapshots(); }).then(function(){ renderAll(); runDueChecks(); });
+        return Promise.all([loadBills(), loadPayments(), loadExpenses(), loadPlanner(), loadAccounts(), loadDebts(), loadDebtPayments(), loadBudgets(), loadSnapshots(), loadSettings()]).then(function(){ return takeSnapshots(); }).then(function(){ renderAll(); runDueChecks(); });
       })
       .catch(function(e){ toast(e.message); });
   }
@@ -2327,6 +2479,7 @@ var App = (function(){
     moveCard:moveCard, mapCaptureResponse:mapCaptureResponse, renderPlanner:renderPlanner,
     accountBalance:accountBalance, payoffProjection:payoffProjection, monthlyClose:monthlyClose,
     netWorth:netWorth, lineChart:lineChart, seriesFor:seriesFor, takeSnapshots:takeSnapshots, renderNetWorth:renderNetWorth,
+    hashPin:hashPin, pinRequired:pinRequired, tryUnlock:tryUnlock, nextPlannerWeek:nextPlannerWeek,
     sortRows:sortRows, toCSV:toCSV, exportCSV:exportCSV, runDueChecks:runDueChecks, renderDebts:renderDebts,
     renderAdmin:renderAdmin, renderAnalysis:renderAnalysis, accountName:accountName,
     VAPID_PUBLIC:VAPID_PUBLIC
