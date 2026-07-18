@@ -585,8 +585,9 @@ const wait = ms => new Promise(r=>setTimeout(r, ms));
     const post = reqs.find(r=>r.url.includes('fam_bills') && r.method==='POST');
     assert(post && JSON.parse(post.body).space === 'private' && JSON.parse(post.body).space_owner === UID, 'private bill POSTed with space + owner');
 
-    // Back to family
-    await A.switchSpace(); await wait(80);
+    // Cycle continues through business (admin) and back to family
+    await A.switchSpace(); await wait(80); // -> business
+    await A.switchSpace(); await wait(80); // -> family
     assert(A.currentSpace() === 'family' && d.getElementById('tab-admin').textContent === 'Admin', 'toggle returns to family; tab reverts to Admin');
     const fb = A.spaceBody({name:'y'});
     assert(fb.space === 'family' && fb.space_owner === null, 'spaceBody stamps family with no owner');
@@ -647,6 +648,63 @@ const wait = ms => new Promise(r=>setTimeout(r, ms));
     const existing = {}; A.state.bills.forEach(b=>existing[b.name.toLowerCase()]=1);
     const filtered = props.filter(p=>!existing[p.title.toLowerCase()]);
     assert(!filtered.some(p=>p.title==='Internet') && filtered.some(p=>p.title==='Sky'), 're-import skips bills that already exist');
+  }
+
+
+  console.log('--- Business space ---');
+  {
+    DB.settings=[]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debts=[]; DB.debtPayments=[]; DB.snapshots=[];
+    const reqs=[];
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){
+        w.fetch = function(url, opts){ reqs.push({url}); return mockFetch(url, opts); };
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}}));
+      }});
+    await wait(200);
+    const d = dom.window.document, A = dom.window.App;
+    // admin cycles family -> private -> business -> family
+    await A.switchSpace(); assert(A.currentSpace()==='private', 'cycle 1: private');
+    reqs.length=0;
+    await A.switchSpace(); await wait(80);
+    assert(A.currentSpace()==='business', 'cycle 2: business (admin only)');
+    assert(reqs.some(r=>r.url.includes('fam_bills') && r.url.includes('space=eq.business')), 'business loads filtered to space=business');
+    assert(d.getElementById('space-badge').textContent==='BUSINESS', 'BUSINESS badge shown');
+    const b = A.spaceBody({name:'x'});
+    assert(b.space==='business' && b.space_owner===null, 'business rows stamped without individual owner');
+    assert(d.getElementById('tab-admin').textContent==='Setup' && d.getElementById('tab-admin').style.display!=='none', 'business space has Setup tab');
+    await A.switchSpace(); assert(A.currentSpace()==='family', 'cycle 3: back to family');
+
+    // non-admin never reaches business
+    A.state.isAdmin = false;
+    await A.switchSpace(); assert(A.currentSpace()==='private', 'member cycle 1: private');
+    await A.switchSpace(); assert(A.currentSpace()==='family', 'member cycle 2: family (business skipped)');
+    A.setSpace('business');
+    assert(A.currentSpace()==='family', 'setSpace refuses business for non-admin');
+    A.state.isAdmin = true;
+  }
+
+  console.log('--- Planner calendar view ---');
+  {
+    const dom = makeDom(); await wait(50);
+    const A = dom.window.App, d = dom.window.document;
+    A.state.plMonth = '2023-04';
+    A.state.income = [{week_date:'2023-04-07', amount:1800, currency:'GBP'}];
+    A.state.planItems = [{week_date:'2023-04-07', amount:1000, currency:'GBP'}];
+    A.state.bills = [{due_date:'2023-04-12', amount:120, currency:'GBP', archived:false},
+                     {due_date:'2023-05-01', amount:999, currency:'GBP', archived:false}];
+    const f = A.calendarFlows('2023-04');
+    assert(f['2023-04-07'].GBP === 800, 'Friday nets income minus planner items (+1800-1000)');
+    assert(f['2023-04-12'].GBP === -120, 'bill due date shows negative flow');
+    assert(!f['2023-05-01'], 'other months excluded');
+    A.renderCalendar();
+    const cal = d.getElementById('pl-cal').innerHTML;
+    assert(cal.includes('class="net pos">+£800.00'), 'positive day rendered green with +');
+    assert(cal.includes('class="net neg">−£120.00'), 'negative day rendered red with −');
+    assert((cal.match(/class="dow"/g)||[]).length === 7, 'seven weekday headers');
+    A.setPlannerMode('cal');
+    assert(d.getElementById('pl-cal').style.display === '' && d.getElementById('pl-board').style.display === 'none', 'calendar mode swaps views');
+    A.setPlannerMode('weeks');
+    assert(d.getElementById('pl-board').style.display === '', 'weeks mode restores board');
   }
 
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');

@@ -138,6 +138,14 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
 .addmini{appearance:none;border:1px dashed var(--line);background:none;color:var(--muted);border-radius:8px;
   padding:5px;width:100%;cursor:pointer;font-size:12px;margin-top:2px}
 .addmini:hover{color:var(--brass);border-color:var(--brass-dim)}
+.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.cal .dow{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);text-align:center;padding:4px 0}
+.cal .day{background:var(--panel);border:1px solid var(--line);border-radius:8px;min-height:58px;padding:5px 6px;font-size:11.5px}
+.cal .day.out{opacity:.35}
+.cal .day.today{border-color:var(--brass)}
+.cal .day .dnum{color:var(--muted);font-family:var(--mono);font-size:10.5px}
+.cal .day .net{font-family:var(--mono);font-size:12px;margin-top:4px;word-break:break-all}
+.cal .day .net.pos{color:var(--green)} .cal .day .net.neg{color:var(--red)}
 .prop{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px}
 .prop .inline3{display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px;margin-top:6px}
 @keyframes sp{to{transform:rotate(360deg)}}
@@ -336,9 +344,14 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
         <span class="m" id="pl-month"></span>
         <button class="iconbtn" id="pl-next" aria-label="Next month">▶</button>
       </div>
-      <span class="small muted">Weeks end on the Friday shown. Drag cards between weeks.</span>
+      <div style="display:flex;gap:6px;align-items:center">
+        <button class="iconbtn" id="pl-mode-weeks" style="color:var(--brass);border-color:var(--brass)">Weeks</button>
+        <button class="iconbtn" id="pl-mode-cal">Calendar</button>
+      </div>
+      <span class="small muted" id="pl-hint">Weeks end on the Friday shown. Drag cards between weeks.</span>
     </div>
     <div class="board" id="pl-board"><div class="empty">Loading…</div></div>
+    <div id="pl-cal" style="display:none"></div>
     <div class="panel" style="margin-top:14px">
       <h2>AI capture</h2>
       <p class="small muted" style="margin-top:0">Paste a bill, email or statement. Claude will propose items to add to the planner — you review before anything is saved.</p>
@@ -1058,35 +1071,42 @@ var App = (function(){
   /* ---------------- spaces (family vs private) ---------------- */
   function currentSpace(){ return state.space || 'family'; }
   function spaceFilter(){
-    return currentSpace() === 'private'
-      ? '&space=eq.private&space_owner=eq.' + state.session.user.id
-      : '&space=eq.family';
+    var sp = currentSpace();
+    if(sp === 'private') return '&space=eq.private&space_owner=eq.' + state.session.user.id;
+    if(sp === 'business') return '&space=eq.business';
+    return '&space=eq.family';
   }
   function spaceBody(obj){
     obj.space = currentSpace();
     obj.space_owner = currentSpace() === 'private' ? state.session.user.id : null;
     return obj;
   }
+  function spaceLabel(sp){ return sp === 'private' ? 'Private' : sp === 'business' ? 'Business' : 'Family'; }
   function setSpace(sp){
+    if(sp === 'business' && !state.isAdmin) sp = 'family';
     state.space = sp;
     localStorage.setItem('fm_space', sp);
+    var col = sp === 'private' ? 'var(--purple)' : sp === 'business' ? 'var(--green)' : 'var(--brass)';
     var sb = $('space-btn');
-    sb.textContent = sp === 'private' ? 'Space: Private' : 'Space: Family';
-    sb.style.borderColor = sp === 'private' ? 'var(--purple)' : 'var(--brass)';
-    sb.style.color = sp === 'private' ? 'var(--purple)' : 'var(--brass)';
+    sb.textContent = 'Space: ' + spaceLabel(sp);
+    sb.style.borderColor = col; sb.style.color = col;
     document.documentElement.setAttribute('data-space', sp);
-    $('space-badge').style.display = sp === 'private' ? '' : 'none';
+    var badge = $('space-badge');
+    badge.style.display = sp === 'family' ? 'none' : '';
+    badge.textContent = sp.toUpperCase();
+    badge.style.borderColor = col; badge.style.color = col;
     var adminTab = $('tab-admin');
-    adminTab.textContent = sp === 'private' ? 'Setup' : 'Admin';
-    // Private space: everyone gets Setup (their own accounts/budgets); family: admins only
-    adminTab.style.display = (sp === 'private' || state.isAdmin) ? '' : 'none';
-    document.querySelectorAll('.fam-only').forEach(function(el){ el.style.display = sp === 'private' ? 'none' : ''; });
+    adminTab.textContent = sp === 'family' ? 'Admin' : 'Setup';
+    adminTab.style.display = (sp !== 'family' || state.isAdmin) ? '' : 'none';
+    document.querySelectorAll('.fam-only').forEach(function(el){ el.style.display = sp === 'family' ? '' : 'none'; });
   }
   function switchSpace(){
-    var sp = currentSpace() === 'private' ? 'family' : 'private';
+    // Cycle: family -> private -> (business, admins only) -> family
+    var order = state.isAdmin ? ['family','private','business'] : ['family','private'];
+    var sp = order[(order.indexOf(currentSpace()) + 1) % order.length];
     setSpace(sp);
     if(state.view === 'admin' && sp === 'family' && !state.isAdmin) setView('dashboard');
-    toast(sp === 'private' ? 'Your private space — only you can see this.' : 'Shared family space.');
+    toast(sp === 'private' ? 'Your private space — only you can see this.' : sp === 'business' ? 'Business space — visible to you alone.' : 'Shared family space.');
     return Promise.all([loadBills(), loadPayments(), loadExpenses(), loadPlanner(),
       loadAccounts(), loadDebts(), loadDebtPayments(), loadBudgets(), loadSnapshots()])
       .then(function(){ return takeSnapshots(); })
@@ -1095,7 +1115,7 @@ var App = (function(){
   }
   // Move an item between spaces (history rows follow their parent)
   function moveSpace(kind, id){
-    var target = currentSpace() === 'private' ? 'family' : 'private';
+    var target = currentSpace() === 'family' ? 'private' : 'family';
     var body = {space:target, space_owner: target === 'private' ? state.session.user.id : null};
     var reqs = [];
     if(kind === 'bill'){
@@ -1259,7 +1279,7 @@ var App = (function(){
       '<div class="list-actions">' +
         '<button class="linkbtn" data-act="paid" data-id="' + esc(b.id) + '">Mark paid</button>' +
         '<button class="linkbtn" data-act="edit" data-id="' + esc(b.id) + '">Edit</button>' +
-        '<button class="linkbtn" data-act="movesp" data-kind="bill" data-id="' + esc(b.id) + '">→ ' + (currentSpace()==='private'?'Family':'Private') + '</button>' +
+        '<button class="linkbtn" data-act="movesp" data-kind="bill" data-id="' + esc(b.id) + '">→ ' + (currentSpace()==='family'?'Private':'Family') + '</button>' +
         (b.receipt_path ? '<button class="linkbtn" data-act="receipt" data-path="' + esc(b.receipt_path) + '">Receipt</button>' : '') +
         (state.isAdmin ? '<button class="linkbtn red" data-act="del" data-id="' + esc(b.id) + '">Delete</button>' : '') +
       '</div></div>' +
@@ -1298,7 +1318,7 @@ var App = (function(){
         (x.note ? ' · ' + esc(x.note) : '') + '</div>' +
         '<div class="list-actions">' +
           (x.receipt_path ? '<button class="linkbtn" data-act="receipt" data-path="' + esc(x.receipt_path) + '">Receipt</button>' : '') +
-          ((x.spent_by === uid || state.isAdmin) ? '<button class="linkbtn" data-act="movesp" data-kind="expense" data-id="' + esc(x.id) + '">→ ' + (currentSpace()==='private'?'Family':'Private') + '</button><button class="linkbtn red" data-act="exdel" data-id="' + esc(x.id) + '">Delete</button>' : '') +
+          ((x.spent_by === uid || state.isAdmin) ? '<button class="linkbtn" data-act="movesp" data-kind="expense" data-id="' + esc(x.id) + '">→ ' + (currentSpace()==='family'?'Private':'Family') + '</button><button class="linkbtn red" data-act="exdel" data-id="' + esc(x.id) + '">Delete</button>' : '') +
         '</div></div>' +
         '<div class="amount">' + esc(fmtMoney(x.amount, x.currency)) + '</div></div>';
     }).join('');
@@ -1424,6 +1444,7 @@ var App = (function(){
         '</div></div>';
     }).join('');
     bindBoardDnD();
+    if(state.plMode === 'cal') renderCalendar();
   }
 
   function nextPlannerWeek(weekISO, recurrence){
@@ -1439,6 +1460,56 @@ var App = (function(){
     }
     return weekISO;
   }
+  // Net planned flow per calendar date: income + on its Friday; bills - on due date;
+  // planner items - on their Friday. Returns {currency: net} per ISO date.
+  function calendarFlows(ym){
+    var flows = {};
+    function bump(dateISO, ccy, v){
+      if(dateISO.slice(0,7) !== ym) return;
+      flows[dateISO] = flows[dateISO] || {};
+      flows[dateISO][ccy] = (flows[dateISO][ccy] || 0) + v;
+    }
+    state.income.forEach(function(i){ bump(i.week_date, i.currency, Number(i.amount)); });
+    state.planItems.forEach(function(it){ bump(it.week_date, it.currency, -Number(it.amount)); });
+    state.bills.forEach(function(b){ if(!b.archived) bump(b.due_date, b.currency, -Number(b.amount)); });
+    return flows;
+  }
+  function renderCalendar(){
+    var ym = state.plMonth, el = $('pl-cal');
+    var flows = calendarFlows(ym);
+    var y = +ym.slice(0,4), m = +ym.slice(5,7);
+    var first = new Date(y, m-1, 1), daysIn = new Date(y, m, 0).getDate();
+    var lead = (first.getDay() + 6) % 7; // Monday-first
+    var cells = '';
+    ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].forEach(function(d){ cells += '<div class="dow">' + d + '</div>'; });
+    for(var i = 0; i < lead; i++) cells += '<div class="day out"></div>';
+    for(var day = 1; day <= daysIn; day++){
+      var iso = ym + '-' + String(day).padStart(2,'0');
+      var f = flows[iso], body = '';
+      if(f){
+        body = Object.keys(f).map(function(c){
+          var v = Math.round(f[c] * 100) / 100;
+          if(!v) return '';
+          return '<div class="net ' + (v > 0 ? 'pos' : 'neg') + '">' + (v > 0 ? '+' : '−') + esc(fmtMoney(Math.abs(v), c)) + '</div>';
+        }).join('');
+      }
+      cells += '<div class="day' + (iso === todayISO() ? ' today' : '') + '"><span class="dnum">' + day + '</span>' + body + '</div>';
+    }
+    el.innerHTML = '<div class="cal">' + cells + '</div>' +
+      '<p class="small muted" style="margin-top:8px">Bills sit on their due date; planner income and items sit on their week\'s Friday.</p>';
+  }
+  function setPlannerMode(mode){
+    state.plMode = mode;
+    localStorage.setItem('fm_plmode', mode);
+    $('pl-board').style.display = mode === 'cal' ? 'none' : '';
+    $('pl-cal').style.display = mode === 'cal' ? '' : 'none';
+    $('pl-hint').textContent = mode === 'cal' ? 'Net money in/out per day.' : 'Weeks end on the Friday shown. Drag cards between weeks.';
+    var w = $('pl-mode-weeks'), c = $('pl-mode-cal');
+    w.style.color = mode === 'cal' ? '' : 'var(--brass)'; w.style.borderColor = mode === 'cal' ? '' : 'var(--brass)';
+    c.style.color = mode === 'cal' ? 'var(--brass)' : ''; c.style.borderColor = mode === 'cal' ? 'var(--brass)' : '';
+    if(mode === 'cal') renderCalendar();
+  }
+
   // Move a card to a different week (returns the PATCH promise)
   function moveCard(kind, id, weekISO){
     if(kind === 'item'){
@@ -1508,7 +1579,7 @@ var App = (function(){
     $('pim-note').value = item ? (item.note || '') : '';
     $('pim-del').style.display = item ? '' : 'none';
     var mv = $('pim-move'); mv.style.display = item ? '' : 'none';
-    mv.textContent = '→ ' + (currentSpace()==='private'?'Family':'Private');
+    mv.textContent = '→ ' + (currentSpace()==='family'?'Private':'Family');
     $('pim-err').style.display = 'none';
     modalOpen('pitem-modal');
   }
@@ -1797,7 +1868,7 @@ var App = (function(){
         '<div class="list-actions">' +
           '<button class="linkbtn" data-act="dpay" data-id="' + esc(d.id) + '">Record payment</button>' +
           '<button class="linkbtn" data-act="dedit" data-id="' + esc(d.id) + '">Edit</button>' +
-          '<button class="linkbtn" data-act="movesp" data-kind="debt" data-id="' + esc(d.id) + '">→ ' + (currentSpace()==='private'?'Family':'Private') + '</button>' +
+          '<button class="linkbtn" data-act="movesp" data-kind="debt" data-id="' + esc(d.id) + '">→ ' + (currentSpace()==='family'?'Private':'Family') + '</button>' +
           (state.isAdmin ? '<button class="linkbtn red" data-act="ddel" data-id="' + esc(d.id) + '">Delete</button>' : '') +
         '</div></div>' +
         '<div style="text-align:right"><div class="amount' + (Number(d.balance) > 0 ? ' overdue' : '') + '">' + esc(fmtMoney(d.balance, d.currency)) + '</div>' +
@@ -2020,9 +2091,9 @@ var App = (function(){
   /* ---------------- admin ---------------- */
   function renderAdmin(){
     var sp = currentSpace();
-    $('tab-admin').textContent = sp === 'private' ? 'Setup' : 'Admin';
-    $('tab-admin').style.display = (sp === 'private' || state.isAdmin) ? '' : 'none';
-    document.querySelectorAll('.fam-only').forEach(function(el){ el.style.display = sp === 'private' ? 'none' : ''; });
+    $('tab-admin').textContent = sp === 'family' ? 'Admin' : 'Setup';
+    $('tab-admin').style.display = (sp !== 'family' || state.isAdmin) ? '' : 'none';
+    document.querySelectorAll('.fam-only').forEach(function(el){ el.style.display = sp === 'family' ? '' : 'none'; });
     if(sp === 'family' && !state.isAdmin) return;
     if($('rate-zwg') && document.activeElement !== $('rate-zwg')) $('rate-zwg').value = ((state.settings.manual_rates || {}).ZWG) || '';
     $('ad-members').innerHTML = state.members.map(function(m){
@@ -2271,7 +2342,7 @@ var App = (function(){
     });
     var nw = netWorth();
     Object.keys(nw).forEach(function(c){
-      rows.push({kind:'networth', ref_id: currentSpace() === 'private' ? 'net-' + state.session.user.id : 'net', label:'Net worth', owner_name: currentSpace() === 'private' ? 'Private' : 'Family', currency:c, value:nw[c]});
+      rows.push({kind:'networth', ref_id: currentSpace() === 'private' ? 'net-' + state.session.user.id : currentSpace() === 'business' ? 'net-biz' : 'net', label:'Net worth', owner_name: currentSpace() === 'private' ? 'Private' : 'Family', currency:c, value:nw[c]});
     });
     rows = rows.map(spaceBody);
     if(!rows.length){ localStorage.setItem(snapKey, todayISO()); return Promise.resolve(); }
@@ -2296,7 +2367,7 @@ var App = (function(){
     }
     // main chart: strongest-history currency
     var best = null, bestLen = 1;
-    var netRef = currentSpace() === 'private' ? 'net-' + state.session.user.id : 'net';
+    var netRef = currentSpace() === 'private' ? 'net-' + state.session.user.id : currentSpace() === 'business' ? 'net-biz' : 'net';
     ccys.forEach(function(c){ var srs = seriesFor('networth',netRef,c); if(srs.length > bestLen){ best = c; bestLen = srs.length; } });
     $('nw-chart').innerHTML = best ? lineChart(seriesFor('networth',netRef,best), 320, 64, {label:'Net worth ' + best, negBad:false}) : lineChart(null,0,0,{});
     $('nw-note').textContent = 'Asset values − debt balances. A daily snapshot is taken on first open.';
@@ -2511,6 +2582,8 @@ var App = (function(){
     document.addEventListener('keydown', function(e){
       if(e.key === 'Escape' && openModal) modalClose(openModal);
     });
+    $('pl-mode-weeks').addEventListener('click', function(){ setPlannerMode('weeks'); });
+    $('pl-mode-cal').addEventListener('click', function(){ setPlannerMode('cal'); });
     $('pl-prev').addEventListener('click', function(){ state.plMonth = shiftMonth(state.plMonth,-1); loadPlanner().then(renderPlanner); });
     $('pl-next').addEventListener('click', function(){ state.plMonth = shiftMonth(state.plMonth,1); loadPlanner().then(renderPlanner); });
     $('pim-save').addEventListener('click', saveItem);
@@ -2666,7 +2739,7 @@ var App = (function(){
       }
       else if(act === 'movesp'){
         var kind = b.getAttribute('data-kind');
-        var target = currentSpace() === 'private' ? 'family' : 'private';
+        var target = currentSpace() === 'family' ? 'private' : 'family';
         askConfirm('Move to ' + target + ' space',
           target === 'family' ? 'The whole family will be able to see this (history included).' : 'Only you will be able to see this (history included).',
           function(){ moveSpace(kind, id).catch(function(err){ toast(err.message); }); });
@@ -2685,6 +2758,7 @@ var App = (function(){
     showApp();
     if(pinRequired()) showPinLock();
     setSpace(currentSpace());
+    setPlannerMode(state.plMode);
     $('ex-date').value = todayISO();
     fillCurrencySelects();
     return Promise.all([loadMembers(), loadRates()])
@@ -2698,7 +2772,9 @@ var App = (function(){
   }
 
   function init(){
-    state.space = localStorage.getItem('fm_space') === 'private' ? 'private' : 'family';
+    var sp0 = localStorage.getItem('fm_space');
+    state.space = (sp0 === 'private' || sp0 === 'business') ? sp0 : 'family';
+    state.plMode = localStorage.getItem('fm_plmode') === 'cal' ? 'cal' : 'weeks';
     var theme = localStorage.getItem('fm_theme');
     if(theme === 'light') document.documentElement.setAttribute('data-theme','light');
     bindEvents();
@@ -2721,6 +2797,7 @@ var App = (function(){
     hashPin:hashPin, pinRequired:pinRequired, tryUnlock:tryUnlock, nextPlannerWeek:nextPlannerWeek,
     currentSpace:currentSpace, spaceFilter:spaceFilter, spaceBody:spaceBody, setSpace:setSpace, switchSpace:switchSpace, moveSpace:moveSpace,
     parseCSV:parseCSV, detectRecurring:detectRecurring, nextDueFromDay:nextDueFromDay,
+    calendarFlows:calendarFlows, renderCalendar:renderCalendar, setPlannerMode:setPlannerMode, spaceLabel:spaceLabel,
     sortRows:sortRows, toCSV:toCSV, exportCSV:exportCSV, runDueChecks:runDueChecks, renderDebts:renderDebts,
     renderAdmin:renderAdmin, renderAnalysis:renderAnalysis, accountName:accountName,
     VAPID_PUBLIC:VAPID_PUBLIC
