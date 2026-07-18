@@ -1,5 +1,5 @@
 /* Family Money service worker — bump CACHE on every deploy */
-var CACHE = 'family-money-v4';
+var CACHE = 'family-money-v5';
 var ASSETS = ['./', './index.html', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', function (e) {

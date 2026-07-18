@@ -91,6 +91,10 @@ function mockFetch(url, opts){
     if(method==='GET') return j(DB.budgets||[]);
     if(method==='POST'){ DB.budgets=DB.budgets||[]; DB.budgets.push(Object.assign({id:'bu'+(DB.budgets.length+1)}, JSON.parse(opts.body))); return j(null,201); }
   }
+  if(url.includes('/rest/v1/fam_snapshots')){
+    if(method==='GET') return j(DB.snapshots||[]);
+    if(method==='POST'){ DB.snapshots=(DB.snapshots||[]).concat(JSON.parse(opts.body)); return j(null,201); }
+  }
   if(url.includes('/functions/v1/notify')){ (DB.notifies=DB.notifies||[]).push(JSON.parse(opts.body)); return j({ok:true}); }
   if(url.includes('/rest/v1/fam_income')) return j([]);
   if(url.includes('/rest/v1/fam_planner_items')) return j([]);
@@ -432,6 +436,38 @@ const wait = ms => new Promise(r=>setTimeout(r, ms));
     d.getElementById('dm-asset').checked = true;
     d.getElementById('dm-asset').dispatchEvent(new dom.window.Event('change', {bubbles:true}));
     assert(d.getElementById('dm-asset-fields').style.display === '', 'ticking asset reveals asset fields');
+  }
+
+
+  console.log('--- Net worth & tracking ---');
+  {
+    const iso = d => d.toISOString().slice(0,10);
+    DB.accounts=[{id:'a1',name:'HSBC',acct_type:'bank',owner_name:'Family',currency:'GBP',opening_balance:1000,archived:false}];
+    DB.debts=[{id:'d1',name:'Mortgage',debt_type:'loan',owner_name:'Family',principal:200000,balance:150000,currency:'GBP',interest_rate:5,min_payment:1200,asset_backed:true,asset_name:'House',asset_value:280000,archived:false}];
+    DB.debtPayments=[]; DB.snapshots=[
+      {kind:'networth',ref_id:'net',currency:'GBP',snap_date:'2026-07-01',value:130000},
+      {kind:'networth',ref_id:'net',currency:'GBP',snap_date:'2026-07-10',value:130500}
+    ];
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){ w.fetch = mockFetch;
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}})); }});
+    await wait(200);
+    const d = dom.window.document, A = dom.window.App;
+    const nw = A.netWorth();
+    assert(nw.GBP === 131000, 'net worth = 1000 account + 280000 asset - 150000 debt');
+    assert(d.getElementById('nw-headline').innerHTML.includes('131,000'), 'net worth headline rendered');
+    assert(d.getElementById('nw-chart').innerHTML.includes('<svg'), 'net worth trend chart drawn from snapshots');
+    assert(d.getElementById('nw-series').innerHTML.includes('HSBC') && d.getElementById('nw-series').innerHTML.includes('Mortgage'), 'per-account and per-debt tracking rows rendered');
+    // snapshot taken on boot (fm_snap unset -> POST fired), incl networth row
+    assert((DB.snapshots||[]).some(r=>r.kind==='account' && r.ref_id==='a1'), 'daily snapshot wrote account row');
+    assert((DB.snapshots||[]).some(r=>r.kind==='networth' && Number(r.value)===131000), 'daily snapshot wrote net worth row');
+    assert(dom.window.localStorage.getItem('fm_snap') === A.todayISO(), 'snapshot deduped for today');
+    // chart helper edge cases
+    assert(A.lineChart([{v:1}],100,30,{}).includes('Not enough history'), 'single point shows building message');
+    assert(A.lineChart([{v:1},{v:5},{v:3}],100,30,{}).includes('polyline'), 'multi-point series draws polyline');
+    // shared Family owner option present in owner selects
+    d.getElementById('debt-add-btn').click();
+    assert(d.getElementById('dm-owner-member').options[0].textContent.includes('Family (shared'), 'Family shared ownership option available');
   }
 
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');

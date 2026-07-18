@@ -188,7 +188,17 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
   <!-- DASHBOARD -->
   <section id="view-dashboard" style="display:none">
     <div class="panel">
-      <div class="row"><h2>Due this week &amp; overdue</h2><span class="eyebrow" id="d-today"></span></div>
+      <div class="row"><h2>Net worth</h2><span class="eyebrow" id="d-today"></span></div>
+      <div class="statgrid" id="nw-headline"></div>
+      <div id="nw-chart" style="margin-top:10px"></div>
+      <div class="small muted" id="nw-note"></div>
+    </div>
+    <div class="panel">
+      <h2>Tracking — accounts &amp; debts over time</h2>
+      <div id="nw-series"></div>
+    </div>
+    <div class="panel">
+      <div class="row"><h2>Due this week &amp; overdue</h2><span class="eyebrow" id="d-today2"></span></div>
       <div id="d-due"></div>
     </div>
     <div class="grid2">
@@ -556,7 +566,7 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
         <input id="dm-asset-value" type="number" inputmode="decimal" step="0.01" min="0"></div>
     </div>
     <div class="inline2">
-      <div><label class="f" for="dm-owner-member">In whose name</label>
+      <div><label class="f" for="dm-owner-member">In whose name (or family shared)</label>
         <select id="dm-owner-member"></select></div>
       <div><label class="f" for="dm-owner-name">Or business name</label>
         <input id="dm-owner-name" placeholder="e.g. Farm Ltd"></div>
@@ -632,7 +642,7 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
         <select id="am-currency"></select></div>
     </div>
     <div class="inline2">
-      <div><label class="f" for="am-owner-member">Owned by member</label>
+      <div><label class="f" for="am-owner-member">Owner (or family shared)</label>
         <select id="am-owner-member"></select></div>
       <div><label class="f" for="am-owner-name">Or business name</label>
         <input id="am-owner-name" placeholder="e.g. Farm Ltd"></div>
@@ -727,7 +737,8 @@ var App = (function(){
     editingBudget: null,
     sortBills: 'due_date',
     sortExpenses: 'spent_at',
-    sortDebts: 'balance'
+    sortDebts: 'balance',
+    snapshots: []
   };
 
   /* ---------------- utilities ---------------- */
@@ -1151,6 +1162,7 @@ var App = (function(){
 
   function renderDashboard(){
     $('d-today').textContent = fmtDate(todayISO());
+    if($('d-today2')) $('d-today2').textContent = '';
 
     // Due this week & overdue
     var soon = state.bills.filter(function(b){ return daysUntil(b.due_date) <= 7; });
@@ -1469,7 +1481,7 @@ var App = (function(){
     });
   }
   function fillOwnerSelect(id){
-    var el = $(id); el.innerHTML = '<option value="">— Not a member —</option>';
+    var el = $(id); el.innerHTML = '<option value="">Family (shared — no individual owner)</option>';
     state.members.forEach(function(m){
       var o = document.createElement('option'); o.value = m.user_id; o.textContent = memberName(m.user_id);
       el.appendChild(o);
@@ -1866,7 +1878,102 @@ var App = (function(){
     if(changed) localStorage.setItem('fm_notified', JSON.stringify(seen));
   }
 
+  /* ---------------- net worth, snapshots & charts ---------------- */
+  // Net worth per currency = account balances + asset values (asset-backed debts) - all debt balances
+  function netWorth(){
+    var nw = {};
+    function bump(c, v){ nw[c] = (nw[c] || 0) + v; }
+    state.accounts.forEach(function(a){ bump(a.currency, accountBalance(a.id)); });
+    state.debts.forEach(function(d){
+      if(d.asset_backed && d.asset_value != null) bump(d.currency, Number(d.asset_value));
+      bump(d.currency, -Number(d.balance));
+    });
+    return nw;
+  }
+  // Simple inline SVG line chart (no libraries), brass line on ink
+  function lineChart(points, w, h, opts){
+    opts = opts || {};
+    if(!points || points.length < 2) return '<div class="small muted">' + (opts.emptyText || 'Not enough history yet — the graph builds as daily snapshots accumulate.') + '</div>';
+    var vals = points.map(function(p){ return p.v; });
+    var min = Math.min.apply(null, vals), max = Math.max.apply(null, vals);
+    if(min === max){ min -= 1; max += 1; }
+    var pad = 4;
+    var xy = points.map(function(p, i){
+      var x = pad + i * (w - 2*pad) / (points.length - 1);
+      var y = h - pad - (p.v - min) * (h - 2*pad) / (max - min);
+      return [Math.round(x*10)/10, Math.round(y*10)/10];
+    });
+    var line = xy.map(function(c){ return c.join(','); }).join(' ');
+    var last = xy[xy.length-1];
+    var up = vals[vals.length-1] >= vals[0];
+    var col = opts.negBad === false ? 'var(--brass)' : (up ? 'var(--green)' : 'var(--red)');
+    return '<svg viewBox="0 0 ' + w + ' ' + h + '" width="100%" height="' + h + '" preserveAspectRatio="none" role="img" aria-label="' + esc(opts.label || 'trend') + '">' +
+      '<polyline fill="none" stroke="' + col + '" stroke-width="1.8" points="' + line + '"/>' +
+      '<circle cx="' + last[0] + '" cy="' + last[1] + '" r="2.4" fill="' + col + '"/></svg>';
+  }
+  function seriesFor(kind, refId, ccy){
+    return state.snapshots
+      .filter(function(r){ return r.kind === kind && r.ref_id === refId && r.currency === ccy; })
+      .sort(function(a,b){ return a.snap_date < b.snap_date ? -1 : 1; })
+      .map(function(r){ return {d:r.snap_date, v:Number(r.value)}; });
+  }
+  function loadSnapshots(){
+    var from = new Date(Date.now() - 365*86400000).toISOString().slice(0,10);
+    return apiJSON('/rest/v1/fam_snapshots?select=*&snap_date=gte.' + from + '&order=snap_date.asc')
+      .then(function(r){ state.snapshots = r || []; })
+      .catch(function(){ state.snapshots = []; });
+  }
+  // First open of the day writes today's values (upsert, so a second device just refreshes them)
+  function takeSnapshots(){
+    if(localStorage.getItem('fm_snap') === todayISO()) return Promise.resolve();
+    var rows = [];
+    state.accounts.forEach(function(a){
+      rows.push({kind:'account', ref_id:a.id, label:a.name, owner_name:a.owner_name, currency:a.currency, value:accountBalance(a.id)});
+    });
+    state.debts.forEach(function(d){
+      rows.push({kind:'debt', ref_id:d.id, label:d.name, owner_name:d.owner_name, currency:d.currency, value:Number(d.balance)});
+    });
+    var nw = netWorth();
+    Object.keys(nw).forEach(function(c){
+      rows.push({kind:'networth', ref_id:'net', label:'Net worth', owner_name:'Family', currency:c, value:nw[c]});
+    });
+    if(!rows.length){ localStorage.setItem('fm_snap', todayISO()); return Promise.resolve(); }
+    return apiJSON('/rest/v1/fam_snapshots?on_conflict=snap_date,kind,ref_id,currency', {
+      method:'POST',
+      headers:{'Prefer':'return=minimal,resolution=merge-duplicates'},
+      body: JSON.stringify(rows)
+    }).then(function(){ localStorage.setItem('fm_snap', todayISO()); return loadSnapshots(); })
+      .catch(function(){ /* snapshots table not migrated yet — quietly skip */ });
+  }
+  function renderNetWorth(){
+    var hl = $('nw-headline'); if(!hl) return;
+    var nw = netWorth(), ccys = Object.keys(nw);
+    hl.innerHTML = ccys.length ? ccys.map(function(c){
+      return '<div class="stat"><div class="eyebrow">' + esc(c) + '</div>' +
+        '<div class="v" style="color:' + (nw[c] >= 0 ? 'var(--brass)' : 'var(--red)') + '">' + esc(fmtMoney(nw[c], c)) + '</div></div>';
+    }).join('') : '<div class="empty" style="grid-column:1/-1">Add accounts and debts to see net worth.</div>';
+    // main chart: strongest-history currency
+    var best = null, bestLen = 1;
+    ccys.forEach(function(c){ var srs = seriesFor('networth','net',c); if(srs.length > bestLen){ best = c; bestLen = srs.length; } });
+    $('nw-chart').innerHTML = best ? lineChart(seriesFor('networth','net',best), 320, 64, {label:'Net worth ' + best, negBad:false}) : lineChart(null,0,0,{});
+    $('nw-note').textContent = 'Accounts + asset values − debts. A daily snapshot is taken on first open.';
+    // per-account and per-debt sparklines
+    var out = '';
+    state.accounts.forEach(function(a){
+      out += '<div class="item"><div><strong>' + esc(a.name) + '</strong><div class="small muted">' + esc(a.owner_name) + ' · account</div></div>' +
+        '<div style="width:130px">' + lineChart(seriesFor('account', a.id, a.currency), 130, 34, {label:a.name}) + '</div>' +
+        '<div class="amount" style="min-width:90px;text-align:right">' + esc(fmtMoney(accountBalance(a.id), a.currency)) + '</div></div>';
+    });
+    state.debts.forEach(function(d){
+      out += '<div class="item"><div><strong>' + esc(d.name) + '</strong><div class="small muted">' + esc(d.owner_name) + ' · debt' + (d.asset_backed ? ' · asset' : '') + '</div></div>' +
+        '<div style="width:130px">' + lineChart(seriesFor('debt', d.id, d.currency).map(function(p){ return {d:p.d, v:-p.v}; }), 130, 34, {label:d.name}) + '</div>' +
+        '<div class="amount overdue" style="min-width:90px;text-align:right">' + esc(fmtMoney(d.balance, d.currency)) + '</div></div>';
+    });
+    $('nw-series').innerHTML = out || '<div class="empty">Nothing to track yet.</div>';
+  }
+
   function renderAll(){
+    renderNetWorth();
     renderBills(); renderPayments(); renderExpenses(); renderDashboard(); renderPlanner();
     renderDebts(); renderDebtPayments(); renderNetPosition(); renderAnalysis(); renderAdmin();
     fillAccountSelects(); setupNotifCard();
@@ -2195,7 +2302,7 @@ var App = (function(){
         showApp(); // re-check membership banner
         if(!state.isMember){ setView('dashboard'); return; }
         setView(state.view);
-        return Promise.all([loadBills(), loadPayments(), loadExpenses(), loadPlanner(), loadAccounts(), loadDebts(), loadDebtPayments(), loadBudgets()]).then(function(){ renderAll(); runDueChecks(); });
+        return Promise.all([loadBills(), loadPayments(), loadExpenses(), loadPlanner(), loadAccounts(), loadDebts(), loadDebtPayments(), loadBudgets(), loadSnapshots()]).then(function(){ return takeSnapshots(); }).then(function(){ renderAll(); runDueChecks(); });
       })
       .catch(function(e){ toast(e.message); });
   }
@@ -2219,6 +2326,7 @@ var App = (function(){
     fridayOf:fridayOf, weeksOfMonth:weeksOfMonth, weekTotals:weekTotals, shiftMonth:shiftMonth,
     moveCard:moveCard, mapCaptureResponse:mapCaptureResponse, renderPlanner:renderPlanner,
     accountBalance:accountBalance, payoffProjection:payoffProjection, monthlyClose:monthlyClose,
+    netWorth:netWorth, lineChart:lineChart, seriesFor:seriesFor, takeSnapshots:takeSnapshots, renderNetWorth:renderNetWorth,
     sortRows:sortRows, toCSV:toCSV, exportCSV:exportCSV, runDueChecks:runDueChecks, renderDebts:renderDebts,
     renderAdmin:renderAdmin, renderAnalysis:renderAnalysis, accountName:accountName,
     VAPID_PUBLIC:VAPID_PUBLIC
