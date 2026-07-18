@@ -348,12 +348,27 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
       </div>
       <div style="display:flex;gap:6px;align-items:center">
         <button class="iconbtn" id="pl-mode-weeks" style="color:var(--brass);border-color:var(--brass)">Weeks</button>
+        <button class="iconbtn" id="pl-mode-day">Day</button>
         <button class="iconbtn" id="pl-mode-cal">Calendar</button>
       </div>
       <span class="small muted" id="pl-hint">Weeks end on the Friday shown. Drag cards between weeks.</span>
     </div>
     <div class="board" id="pl-board"><div class="empty">Loading…</div></div>
     <div id="pl-cal" style="display:none"></div>
+    <div id="pl-day" style="display:none">
+      <div class="row" style="margin-bottom:10px">
+        <div class="monthnav">
+          <button class="iconbtn" id="day-prev" aria-label="Previous day">◀</button>
+          <input type="date" id="day-date" style="width:auto">
+          <button class="iconbtn" id="day-next" aria-label="Next day">▶</button>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn" id="day-add-item">+ Item this day</button>
+          <button class="btn ghost" id="day-add-inc">+ Income this day</button>
+        </div>
+      </div>
+      <div class="panel"><div id="day-list"></div></div>
+    </div>
     <div class="panel" style="margin-top:14px">
       <h2>AI capture</h2>
       <p class="small muted" style="margin-top:0">Paste a bill, email or statement. Claude will propose items to add to the planner — you review before anything is saved.</p>
@@ -559,10 +574,13 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
       <div><label class="f" for="pim-recur">Repeats</label>
         <select id="pim-recur">
           <option value="none">One-off</option>
+          <option value="daily">Daily</option>
           <option value="weekly">Weekly</option>
           <option value="monthly">Monthly</option>
         </select></div>
     </div>
+    <label class="f" for="pim-day">Exact day (optional — otherwise the week is enough)</label>
+    <input id="pim-day" type="date">
     <label class="f" for="pim-account">Account</label>
     <select id="pim-account" class="acct-select"></select>
     <label class="f" for="pim-note">Note</label>
@@ -596,10 +614,13 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
       <div><label class="f" for="im-recur">Repeats</label>
         <select id="im-recur">
           <option value="none">One-off</option>
+          <option value="daily">Daily</option>
           <option value="weekly">Weekly</option>
           <option value="monthly">Monthly</option>
         </select></div>
     </div>
+    <label class="f" for="im-day">Exact day (optional)</label>
+    <input id="im-day" type="date">
     <label class="f" for="im-account">Into account</label>
     <select id="im-account" class="acct-select"></select>
     <div id="im-err" class="small" style="color:var(--red);margin-top:8px;display:none"></div>
@@ -1133,7 +1154,7 @@ var App = (function(){
     if(state.isAdmin) order.push('business');
     if(state.isAdmin || state.farmGranted) order.push('farm');
     var sp = order[(order.indexOf(currentSpace()) + 1) % order.length];
-    if(sp === 'private' || sp === 'business'){
+    if(sp === 'private'){
       return new Promise(function(resolve){
         requireSpacePin(sp, function(){
           setSpace(sp);
@@ -1227,13 +1248,18 @@ var App = (function(){
     Object.keys(series).forEach(function(key){
       var rows = series[key].sort(function(a,b){ return a.week_date < b.week_date ? -1 : 1; });
       var last = rows[rows.length - 1], guard = 0;
-      var next = nextPlannerWeek(last.week_date, last.recurrence);
-      while(next <= windowEndISO && guard++ < 12){
+      var dayBased = !!last.on_date || last.recurrence === 'daily';
+      var cap = last.recurrence === 'daily' ? 31 : 12;
+      var cursor = dayBased ? (last.on_date || last.week_date) : last.week_date;
+      var next = dayBased ? nextOnDate(cursor, last.recurrence) : nextPlannerWeek(cursor, last.recurrence);
+      while(next <= windowEndISO && guard++ < cap){
         posts.push(apiJSON('/rest/v1/fam_income', {method:'POST', headers:{'Prefer':'return=minimal'},
           body: JSON.stringify(spaceBody({person:last.person, amount:last.amount, currency:last.currency,
-            week_date:next, recurrence:last.recurrence, series_id:key,
+            week_date: dayBased ? fridayOf(next) : next,
+            on_date: dayBased ? next : null,
+            recurrence:last.recurrence, series_id:key,
             account_id:last.account_id || null}))}));
-        next = nextPlannerWeek(next, last.recurrence);
+        next = dayBased ? nextOnDate(next, last.recurrence) : nextPlannerWeek(next, last.recurrence);
       }
     });
     if(!posts.length) return Promise.resolve(false);
@@ -1494,7 +1520,7 @@ var App = (function(){
       var t = weekTotals(w, state.income, state.planItems, state.bills);
       var incCards = state.income.filter(function(i){ return i.week_date === w; }).map(function(i){
         return '<div class="card income" draggable="true" data-kind="income" data-id="' + esc(i.id) + '">' +
-          '<div class="crow"><span class="ctitle">' + esc(i.person) + (i.recurrence && i.recurrence !== 'none' ? ' <span class="badge brass">' + esc(i.recurrence) + '</span>' : '') + '</span>' +
+          '<div class="crow"><span class="ctitle">' + esc(i.person) + (i.recurrence && i.recurrence !== 'none' ? ' <span class="badge brass">' + esc(i.recurrence) + '</span>' : '') + (i.on_date ? ' <span class="badge">' + esc(fmtShort(i.on_date)) + '</span>' : '') + '</span>' +
           '<span class="amount">' + esc(fmtMoney(i.amount, i.currency)) + '</span></div></div>';
       }).join('');
       var billCards = state.bills.filter(function(b){ return !b.archived && fridayOf(b.due_date) === w; }).map(function(b){
@@ -1505,7 +1531,7 @@ var App = (function(){
       }).join('');
       var itemCards = state.planItems.filter(function(i){ return i.week_date === w; }).map(function(i){
         return '<div class="card' + (i.paid ? ' paid' : '') + '" draggable="true" data-kind="item" data-id="' + esc(i.id) + '">' +
-          '<div class="crow"><span class="ctitle">' + esc(i.title) + (i.recurrence && i.recurrence !== 'none' ? ' <span class="badge brass">' + esc(i.recurrence) + '</span>' : '') + '</span>' +
+          '<div class="crow"><span class="ctitle">' + esc(i.title) + (i.recurrence && i.recurrence !== 'none' ? ' <span class="badge brass">' + esc(i.recurrence) + '</span>' : '') + (i.on_date ? ' <span class="badge">' + esc(fmtShort(i.on_date)) + '</span>' : '') + '</span>' +
           '<span class="amount">' + esc(fmtMoney(i.amount, i.currency)) + '</span></div>' +
           '<div class="cactions"><button class="paidtick' + (i.paid ? ' on' : '') + '" data-act="ptick" data-id="' + esc(i.id) + '">' +
           (i.paid ? 'Paid' : 'Mark paid') + '</button></div></div>';
@@ -1524,9 +1550,25 @@ var App = (function(){
     }).join('');
     bindBoardDnD();
     if(state.plMode === 'cal') renderCalendar();
+    if(state.plMode === 'day') renderDay();
   }
 
+  function nextOnDate(dateISO, recurrence){
+    var d = new Date(dateISO + 'T00:00:00');
+    if(recurrence === 'daily') d.setDate(d.getDate() + 1);
+    else if(recurrence === 'weekly') d.setDate(d.getDate() + 7);
+    else if(recurrence === 'monthly'){
+      var day = d.getDate();
+      d.setDate(1); d.setMonth(d.getMonth() + 1);
+      var last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+      d.setDate(Math.min(day, last));
+    } else return dateISO;
+    return isoOf(d);
+  }
   function nextPlannerWeek(weekISO, recurrence){
+    if(recurrence === 'daily'){ // day-based; caller should use nextOnDate, but stay safe
+      return fridayOf(nextOnDate(weekISO, 'daily'));
+    }
     if(recurrence === 'weekly'){
       var d = new Date(weekISO + 'T00:00:00'); d.setDate(d.getDate() + 7); return isoOf(d);
     }
@@ -1548,8 +1590,8 @@ var App = (function(){
       flows[dateISO] = flows[dateISO] || {};
       flows[dateISO][ccy] = (flows[dateISO][ccy] || 0) + v;
     }
-    state.income.forEach(function(i){ bump(i.week_date, i.currency, Number(i.amount)); });
-    state.planItems.forEach(function(it){ bump(it.week_date, it.currency, -Number(it.amount)); });
+    state.income.forEach(function(i){ bump(i.on_date || i.week_date, i.currency, Number(i.amount)); });
+    state.planItems.forEach(function(it){ bump(it.on_date || it.week_date, it.currency, -Number(it.amount)); });
     state.bills.forEach(function(b){ if(!b.archived) bump(b.due_date, b.currency, -Number(b.amount)); });
     return flows;
   }
@@ -1572,21 +1614,49 @@ var App = (function(){
           return '<div class="net ' + (v > 0 ? 'pos' : 'neg') + '">' + (v > 0 ? '+' : '−') + esc(fmtMoney(Math.abs(v), c)) + '</div>';
         }).join('');
       }
-      cells += '<div class="day' + (iso === todayISO() ? ' today' : '') + '"><span class="dnum">' + day + '</span>' + body + '</div>';
+      cells += '<div class="day' + (iso === todayISO() ? ' today' : '') + '" data-day="' + iso + '" style="cursor:pointer" title="Open this day"><span class="dnum">' + day + '</span>' + body + '</div>';
     }
     el.innerHTML = '<div class="cal">' + cells + '</div>' +
-      '<p class="small muted" style="margin-top:8px">Bills sit on their due date; planner income and items sit on their week\'s Friday.</p>';
+      '<p class="small muted" style="margin-top:8px">Bills sit on their due date; day-anchored entries on their day; week-anchored entries on their week\'s Friday. Click a day to open it.</p>';
+  }
+  function renderDay(){
+    var iso = state.plDay || todayISO();
+    $('day-date').value = iso;
+    var rows = [];
+    state.bills.forEach(function(b){ if(!b.archived && b.due_date === iso) rows.push({t:'Bill due', name:b.name, amt:-Number(b.amount), ccy:b.currency, edit:{kind:'bill', id:b.id}}); });
+    state.income.forEach(function(i){ if((i.on_date || '') === iso) rows.push({t:'Income', name:i.person, amt:Number(i.amount), ccy:i.currency, edit:{kind:'income', id:i.id}}); });
+    state.planItems.forEach(function(it){ if((it.on_date || '') === iso) rows.push({t:it.paid ? 'Item · paid' : 'Item', name:it.title, amt:-Number(it.amount), ccy:it.currency, edit:{kind:'item', id:it.id}}); });
+    // week-anchored entries surface on their Friday
+    if(fridayOf(iso) === iso){
+      state.income.forEach(function(i){ if(!i.on_date && i.week_date === iso) rows.push({t:'Income (week)', name:i.person, amt:Number(i.amount), ccy:i.currency, edit:{kind:'income', id:i.id}}); });
+      state.planItems.forEach(function(it){ if(!it.on_date && it.week_date === iso) rows.push({t:it.paid ? 'Item (week) · paid' : 'Item (week)', name:it.title, amt:-Number(it.amount), ccy:it.currency, edit:{kind:'item', id:it.id}}); });
+    }
+    var net = {};
+    rows.forEach(function(r){ net[r.ccy] = (net[r.ccy] || 0) + r.amt; });
+    $('day-list').innerHTML = (rows.length ? rows.map(function(r){
+      return '<div class="item"><div><strong>' + esc(r.name) + '</strong><div class="small muted">' + esc(r.t) + '</div>' +
+        '<div class="list-actions"><button class="linkbtn" data-dayedit="' + esc(r.edit.kind) + ':' + esc(r.edit.id) + '">Open</button></div></div>' +
+        '<div class="amount' + (r.amt < 0 ? ' overdue' : '') + '" style="color:' + (r.amt >= 0 ? 'var(--green)' : '') + '">' +
+        (r.amt >= 0 ? '+' : '−') + esc(fmtMoney(Math.abs(r.amt), r.ccy)) + '</div></div>';
+    }).join('') + '<div class="item"><div class="muted small">Day net</div><div class="amount">' +
+      esc(Object.keys(net).map(function(c){ return (net[c] >= 0 ? '+' : '−') + fmtMoney(Math.abs(net[c]), c); }).join(' · ')) + '</div></div>'
+    : '<div class="empty">Nothing on this day. Add an item or income with the buttons above.</div>');
   }
   function setPlannerMode(mode){
     state.plMode = mode;
     localStorage.setItem('fm_plmode', mode);
-    $('pl-board').style.display = mode === 'cal' ? 'none' : '';
+    $('pl-board').style.display = mode === 'weeks' ? '' : 'none';
     $('pl-cal').style.display = mode === 'cal' ? '' : 'none';
-    $('pl-hint').textContent = mode === 'cal' ? 'Net money in/out per day.' : 'Weeks end on the Friday shown. Drag cards between weeks.';
-    var w = $('pl-mode-weeks'), c = $('pl-mode-cal');
-    w.style.color = mode === 'cal' ? '' : 'var(--brass)'; w.style.borderColor = mode === 'cal' ? '' : 'var(--brass)';
-    c.style.color = mode === 'cal' ? 'var(--brass)' : ''; c.style.borderColor = mode === 'cal' ? 'var(--brass)' : '';
+    $('pl-day').style.display = mode === 'day' ? '' : 'none';
+    $('pl-hint').textContent = mode === 'cal' ? 'Net money in/out per day. Click a day to open it.'
+      : mode === 'day' ? 'Everything landing on one date.'
+      : 'Weeks end on the Friday shown. Drag cards between weeks.';
+    [['pl-mode-weeks','weeks'],['pl-mode-day','day'],['pl-mode-cal','cal']].forEach(function(pair){
+      var el = $(pair[0]), on = mode === pair[1];
+      el.style.color = on ? 'var(--brass)' : ''; el.style.borderColor = on ? 'var(--brass)' : '';
+    });
     if(mode === 'cal') renderCalendar();
+    if(mode === 'day') renderDay();
   }
 
   // Move a card to a different week (returns the PATCH promise)
@@ -1654,6 +1724,7 @@ var App = (function(){
     $('pim-currency').value = item ? item.currency : 'GBP';
     fillWeekSelect('pim-week', item ? item.week_date : week);
     $('pim-recur').value = item ? (item.recurrence || 'none') : 'none';
+    $('pim-day').value = item && item.on_date ? item.on_date : (arguments.length > 2 && arguments[2] ? arguments[2] : '');
     $('pim-account').value = item && item.account_id ? item.account_id : '';
     $('pim-note').value = item ? (item.note || '') : '';
     $('pim-del').style.display = item ? '' : 'none';
@@ -1667,7 +1738,9 @@ var App = (function(){
     var errEl = $('pim-err');
     if(!title || !(amount >= 0)){ errEl.textContent = 'Title and a valid amount are required.'; errEl.style.display=''; return; }
     var body = {title:title, amount:amount, currency:$('pim-currency').value,
-      week_date:$('pim-week').value, note:($('pim-note').value.trim() || null),
+      week_date:($('pim-day').value ? fridayOf($('pim-day').value) : $('pim-week').value),
+      on_date:($('pim-day').value || null),
+      note:($('pim-note').value.trim() || null),
       recurrence:$('pim-recur').value,
       account_id:($('pim-account').value || null)};
     var p = state.editingItem
@@ -1684,6 +1757,7 @@ var App = (function(){
     $('im-amount').value = inc ? inc.amount : '';
     $('im-currency').value = inc ? inc.currency : 'GBP';
     $('im-recur').value = inc ? (inc.recurrence || 'none') : 'none';
+    $('im-day').value = inc && inc.on_date ? inc.on_date : '';
     $('im-stop').style.display = (inc && inc.recurrence && inc.recurrence !== 'none') ? '' : 'none';
     fillWeekSelect('im-week', inc ? inc.week_date : week);
     var dl = $('person-list'); dl.innerHTML = '';
@@ -1697,7 +1771,9 @@ var App = (function(){
     var person = $('im-person').value.trim(), amount = parseFloat($('im-amount').value);
     var errEl = $('im-err');
     if(!person || !(amount >= 0)){ errEl.textContent = 'Person and a valid amount are required.'; errEl.style.display=''; return; }
-    var body = {person:person, amount:amount, currency:$('im-currency').value, week_date:$('im-week').value,
+    var body = {person:person, amount:amount, currency:$('im-currency').value,
+      week_date:($('im-day').value ? fridayOf($('im-day').value) : $('im-week').value),
+      on_date:($('im-day').value || null),
       recurrence:$('im-recur').value,
       account_id:($('im-account').value || null)};
     var p = state.editingIncome
@@ -2718,6 +2794,37 @@ var App = (function(){
     });
     $('pl-mode-weeks').addEventListener('click', function(){ setPlannerMode('weeks'); });
     $('pl-mode-cal').addEventListener('click', function(){ setPlannerMode('cal'); });
+    $('pl-mode-day').addEventListener('click', function(){ setPlannerMode('day'); });
+    $('day-prev').addEventListener('click', function(){
+      var d = new Date((state.plDay || todayISO()) + 'T00:00:00'); d.setDate(d.getDate() - 1);
+      state.plDay = isoOf(d); state.plMonth = state.plDay.slice(0,7); loadPlanner().then(function(){ renderPlanner(); renderDay(); });
+    });
+    $('day-next').addEventListener('click', function(){
+      var d = new Date((state.plDay || todayISO()) + 'T00:00:00'); d.setDate(d.getDate() + 1);
+      state.plDay = isoOf(d); state.plMonth = state.plDay.slice(0,7); loadPlanner().then(function(){ renderPlanner(); renderDay(); });
+    });
+    $('day-date').addEventListener('change', function(){
+      if(!this.value) return;
+      state.plDay = this.value; state.plMonth = this.value.slice(0,7);
+      loadPlanner().then(function(){ renderPlanner(); renderDay(); });
+    });
+    $('day-add-item').addEventListener('click', function(){ openItemModal(null, fridayOf(state.plDay || todayISO()), state.plDay || todayISO()); });
+    $('day-add-inc').addEventListener('click', function(){
+      openIncomeModal(null, fridayOf(state.plDay || todayISO()));
+      $('im-day').value = state.plDay || todayISO();
+    });
+    $('pl-cal').addEventListener('click', function(e){
+      var cell = e.target.closest('[data-day]'); if(!cell) return;
+      state.plDay = cell.getAttribute('data-day');
+      setPlannerMode('day');
+    });
+    $('pl-day').addEventListener('click', function(e){
+      var b = e.target.closest('[data-dayedit]'); if(!b) return;
+      var parts = b.getAttribute('data-dayedit').split(':'), kind = parts[0], id = parts[1];
+      if(kind === 'bill') openBillModal(state.bills.find(function(x){ return x.id === id; }));
+      else if(kind === 'income') openIncomeModal(state.income.find(function(x){ return x.id === id; }));
+      else openItemModal(state.planItems.find(function(x){ return x.id === id; }));
+    });
     $('pl-prev').addEventListener('click', function(){ state.plMonth = shiftMonth(state.plMonth,-1); loadPlanner().then(renderPlanner); });
     $('pl-next').addEventListener('click', function(){ state.plMonth = shiftMonth(state.plMonth,1); loadPlanner().then(renderPlanner); });
     $('pim-save').addEventListener('click', saveItem);
@@ -2787,11 +2894,15 @@ var App = (function(){
             .then(function(){
               Object.assign(it, patch);
               if(patch.paid && it.recurrence && it.recurrence !== 'none'){
-                var nw = nextPlannerWeek(it.week_date, it.recurrence);
-                var exists = state.planItems.some(function(x){ return x.title === it.title && x.week_date === nw && !x.paid; });
+                var dayBased = !!it.on_date || it.recurrence === 'daily';
+                var nd = dayBased ? nextOnDate(it.on_date || it.week_date, it.recurrence) : null;
+                var nw = dayBased ? fridayOf(nd) : nextPlannerWeek(it.week_date, it.recurrence);
+                var exists = state.planItems.some(function(x){ return x.title === it.title && !x.paid &&
+                  (dayBased ? x.on_date === nd : x.week_date === nw); });
                 if(!exists){
                   return apiJSON('/rest/v1/fam_planner_items', {method:'POST', headers:{'Prefer':'return=minimal'},
                     body:JSON.stringify(spaceBody({title:it.title, amount:it.amount, currency:it.currency, week_date:nw,
+                      on_date: dayBased ? nd : null,
                       recurrence:it.recurrence, account_id:it.account_id || null, note:it.note || null}))})
                     .then(function(){ return loadPlanner(); }).then(renderPlanner);
                 }
@@ -2911,7 +3022,7 @@ var App = (function(){
 
   function boot(){
     showApp();
-    if(currentSpace() === 'private' || currentSpace() === 'business'){
+    if(currentSpace() === 'private'){
       // Hold at the lock; fall back to family so nothing gated renders behind it
       var target = currentSpace();
       setSpace('family');
@@ -2934,7 +3045,9 @@ var App = (function(){
   function init(){
     var sp0 = localStorage.getItem('fm_space');
     state.space = (sp0 === 'private' || sp0 === 'business') ? sp0 : 'family';
-    state.plMode = localStorage.getItem('fm_plmode') === 'cal' ? 'cal' : 'weeks';
+    var pm = localStorage.getItem('fm_plmode');
+    state.plMode = (pm === 'cal' || pm === 'day') ? pm : 'weeks';
+    state.plDay = todayISO();
     var theme = localStorage.getItem('fm_theme');
     if(theme === 'light') document.documentElement.setAttribute('data-theme','light');
     bindEvents();
@@ -2959,6 +3072,7 @@ var App = (function(){
     currentSpace:currentSpace, spaceFilter:spaceFilter, spaceBody:spaceBody, setSpace:setSpace, switchSpace:switchSpace, moveSpace:moveSpace,
     parseCSV:parseCSV, detectRecurring:detectRecurring, nextDueFromDay:nextDueFromDay,
     calendarFlows:calendarFlows, renderCalendar:renderCalendar, setPlannerMode:setPlannerMode, spaceLabel:spaceLabel,
+    nextOnDate:nextOnDate, renderDay:renderDay,
     loadGrants:loadGrants,
     sortRows:sortRows, toCSV:toCSV, exportCSV:exportCSV, runDueChecks:runDueChecks, renderDebts:renderDebts,
     renderAdmin:renderAdmin, renderAnalysis:renderAnalysis, accountName:accountName,

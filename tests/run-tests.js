@@ -831,7 +831,7 @@ async function cycleSpace(dom, A){
   }
 
 
-  console.log('--- PIN demanded on EVERY gated entry (private & business) ---');
+  console.log('--- PIN demanded on EVERY private entry; business/family/farm ungated ---');
   {
     DB.settings=[]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[];
     const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
@@ -847,12 +847,11 @@ async function cycleSpace(dom, A){
     d.getElementById('pin-input').value='1234'; await A.tryUnlock(); await p; await wait(40);
     assert(A.currentSpace()==='private', 'unlock enters private');
 
-    // Entry 2: private -> business prompts AGAIN despite session unlock
+    // Entry 2: private -> business is NOT gated (business ungated by request)
     p = A.switchSpace(); await wait(40);
-    assert(d.getElementById('pin-lock').classList.contains('open'), 'flicking to business prompts again — session unlock not reused');
-    assert(A.currentSpace()==='private', 'business not entered before unlock');
-    d.getElementById('pin-input').value='1234'; await A.tryUnlock(); await p; await wait(40);
-    assert(A.currentSpace()==='business', 'unlock enters business');
+    assert(!d.getElementById('pin-lock').classList.contains('open'), 'business entry not PIN-gated');
+    await p; await wait(40);
+    assert(A.currentSpace()==='business', 'business entered directly');
 
     // farm and family remain ungated
     p = A.switchSpace(); await wait(40);
@@ -917,6 +916,40 @@ async function cycleSpace(dom, A){
     A.state.plMonth = A.shiftMonth(A.state.plMonth, 1);
     await A.boot(); await wait(200);
     assert(DB.income.length === count2, 'stopped series creates nothing further');
+  }
+
+
+  console.log('--- Day view + daily recurrence + day anchoring ---');
+  {
+    const dom = makeDom(); await wait(50);
+    const A = dom.window.App, d = dom.window.document;
+    assert(A.nextOnDate('2026-07-18','daily') === '2026-07-19', 'daily +1 day');
+    assert(A.nextOnDate('2026-07-18','weekly') === '2026-07-25', 'weekly +7 days on exact date');
+    assert(A.nextOnDate('2026-01-31','monthly') === '2026-02-28', 'monthly on-date clamps month end');
+
+    A.state.plMonth = '2026-07'; A.state.plDay = '2026-07-15';
+    A.state.bills = [{id:'b9', name:'Sky', amount:160, currency:'GBP', due_date:'2026-07-15', archived:false}];
+    A.state.income = [{id:'i9', person:'Rodney', amount:500, currency:'GBP', week_date:'2026-07-17', on_date:'2026-07-15'}];
+    A.state.planItems = [{id:'p9', title:'Fuel', amount:60, currency:'GBP', week_date:'2026-07-17', on_date:'2026-07-15', paid:false},
+                         {id:'p10', title:'Farm', amount:1000, currency:'GBP', week_date:'2026-07-17', on_date:null, paid:false}];
+    A.renderDay();
+    const dl = d.getElementById('day-list').innerHTML;
+    assert(dl.includes('Sky') && dl.includes('Rodney') && dl.includes('Fuel'), 'day view lists bill, income and item on the date');
+    assert(!dl.includes('Farm'), 'week-anchored item not shown on a non-Friday');
+    assert(dl.includes('Day net'), 'day net computed');
+
+    A.state.plDay = '2026-07-17'; A.renderDay();
+    assert(d.getElementById('day-list').innerHTML.includes('Farm'), 'week-anchored item surfaces on its Friday');
+
+    // calendar places day-anchored entries on their exact day
+    const f = A.calendarFlows('2026-07');
+    assert(f['2026-07-15'].GBP === 500 - 60 - 160, 'calendar nets day-anchored entries on the exact date');
+    assert(f['2026-07-17'].GBP === -1000, 'week-anchored item still on its Friday');
+
+    // mode switching includes day
+    A.setPlannerMode('day');
+    assert(d.getElementById('pl-day').style.display === '' && d.getElementById('pl-board').style.display === 'none', 'day mode swaps views');
+    A.setPlannerMode('weeks');
   }
 
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');
