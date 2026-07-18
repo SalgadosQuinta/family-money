@@ -95,6 +95,12 @@ function mockFetch(url, opts){
     if(method==='GET') return j(DB.snapshots||[]);
     if(method==='POST'){ DB.snapshots=(DB.snapshots||[]).concat(JSON.parse(opts.body)); return j(null,201); }
   }
+  if(url.includes('/rest/v1/fam_assets')){
+    if(method==='GET') return j((DB.assets||[]).filter(a=>!a.archived));
+    if(method==='POST'){ DB.assets=DB.assets||[]; DB.assets.push(Object.assign({id:'as'+(DB.assets.length+1), archived:false}, JSON.parse(opts.body))); return j(null,201); }
+    if(method==='PATCH'){ const id=/id=eq\.([^&]+)/.exec(url)[1]; Object.assign((DB.assets||[]).find(x=>x.id===id), JSON.parse(opts.body)); return j(null,204); }
+    if(method==='DELETE'){ const id=/id=eq\.([^&]+)/.exec(url)[1]; DB.assets=(DB.assets||[]).filter(x=>x.id!==id); return j(null,204); }
+  }
   if(url.includes('/rest/v1/fam_space_grants')){
     if(method==='GET') return j(DB.grants||[]);
     if(method==='POST'){ DB.grants=(DB.grants||[]); DB.grants.push(JSON.parse(opts.body)); return j(null,201); }
@@ -1000,6 +1006,54 @@ async function cycleSpace(dom, A){
     A.state.farmGranted = true; A.setSpace('family');
     assert(opts().includes('farm') && !opts().includes('business'), 'granted member gains farm but not business');
     A.state.isAdmin = true;
+  }
+
+
+  console.log('--- Assets register ---');
+  {
+    DB.settings=[]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[];
+    DB.assets=[{id:'as1', name:'TRJ Farm land', category:'Land', owner_name:'TRJ Farms', currency:'USD', value:120000, valued_at:'2026-07-01', archived:false}];
+    DB.debts=[{id:'d1', name:'Mortgage', debt_type:'loan', owner_name:'Family', principal:200000, balance:150000, currency:'GBP', interest_rate:5, min_payment:1200, asset_backed:true, asset_name:'House', asset_value:280000, archived:false}];
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){ w.fetch = mockFetch;
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}})); }});
+    await wait(200);
+    const d = dom.window.document, A = dom.window.App;
+    d.querySelector('#tabs button[data-view="assets"]').click();
+    const al = d.getElementById('assets-list').innerHTML;
+    assert(al.includes('TRJ Farm land') && al.includes('120,000'), 'asset listed with value');
+    assert(d.getElementById('assets-total').innerHTML.includes('USD total'), 'per-currency total shown');
+    assert(d.getElementById('assets-financed').innerHTML.includes('House') && d.getElementById('assets-financed').innerHTML.includes('equity £130,000'), 'financed assets from Debts shown with equity');
+
+    // net worth includes the standalone asset
+    const nw = A.netWorth();
+    assert(nw.USD === 120000, 'standalone asset counted in net worth (USD)');
+    assert(nw.GBP === 130000, 'financed asset equity path unchanged (GBP 280k-150k)');
+
+    // snapshots write asset rows
+    assert((DB.snapshots||[]).some(r=>r.kind==='asset' && r.ref_id==='as1'), 'daily snapshot includes asset value');
+
+    // add via modal
+    d.getElementById('asset-add-btn').click();
+    assert(d.getElementById('asset-modal').classList.contains('open'), 'asset modal opens');
+    d.getElementById('asm-save').click(); await wait(30);
+    assert(d.getElementById('asm-err').style.display !== 'none', 'validation requires name and value');
+    d.getElementById('asm-name').value='Hilux';
+    d.getElementById('asm-value').value='15000';
+    d.getElementById('asm-currency').value='USD';
+    d.getElementById('asm-save').click(); await wait(120);
+    assert(DB.assets.some(a=>a.name==='Hilux' && Number(a.value)===15000), 'new asset saved');
+    assert(DB.assets.find(a=>a.name==='Hilux').space==='family', 'asset stamped with current space');
+    assert(!d.getElementById('asset-modal').classList.contains('open'), 'modal closes after save');
+
+    // revalue
+    A.state.assets = DB.assets;
+    d.querySelector('button[data-act="asedit"][data-id="as1"]') && d.querySelector('button[data-act="asedit"][data-id="as1"]').click();
+    if(d.getElementById('asset-modal').classList.contains('open')){
+      d.getElementById('asm-value').value='125000';
+      d.getElementById('asm-save').click(); await wait(120);
+      assert(Number(DB.assets.find(a=>a.id==='as1').value)===125000, 'revaluation persists');
+    } else { assert(false, 'edit opens the modal'); }
   }
 
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');
