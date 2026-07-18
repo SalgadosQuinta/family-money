@@ -1056,6 +1056,63 @@ async function cycleSpace(dom, A){
     } else { assert(false, 'edit opens the modal'); }
   }
 
+
+  console.log('--- Debt linked to register asset (no double record) ---');
+  {
+    DB.settings=[]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[];
+    DB.assets=[{id:'as1', name:'House', category:'Property', owner_name:'Family', currency:'GBP', value:280000, valued_at:'2026-07-01', archived:false},
+               {id:'as2', name:'Bakkie', category:'Vehicle', owner_name:'Family', currency:'USD', value:15000, valued_at:'2026-07-01', archived:false}];
+    DB.debts=[{id:'d1', name:'Mortgage', debt_type:'loan', owner_name:'Family', principal:200000, balance:150000, currency:'GBP',
+               interest_rate:5, min_payment:1200, asset_backed:true, asset_id:'as1', asset_name:null, asset_value:null, archived:false},
+              {id:'d2', name:'Car loan', debt_type:'loan', owner_name:'Family', principal:10000, balance:8000, currency:'GBP',
+               interest_rate:9, min_payment:250, asset_backed:true, asset_id:'as2', asset_name:null, asset_value:null, archived:false}];
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){ w.fetch = mockFetch;
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}})); }});
+    await wait(200);
+    const d = dom.window.document, A = dom.window.App;
+
+    // helper resolution
+    const ai = A.debtAssetInfo(A.state.debts.find(x=>x.id==='d1'));
+    assert(ai.linked && ai.name==='House' && ai.value===280000, 'linked debt resolves register asset');
+    const eq = A.debtEquity(A.state.debts.find(x=>x.id==='d1'));
+    assert(eq.equity===130000, 'equity from register value (280k-150k)');
+    assert(A.debtEquity(A.state.debts.find(x=>x.id==='d2'))===null, 'currency mismatch yields no equity number');
+
+    // no double counting: GBP = 280000 asset - 150000 - 8000 = 122000; USD = 15000
+    const nw = A.netWorth();
+    assert(nw.GBP===122000 && nw.USD===15000, 'linked asset counted once in net worth');
+
+    // debts list shows register equity; assets list badges financed
+    d.querySelector('#tabs button[data-view="debts"]').click();
+    assert(d.getElementById('debts-list').innerHTML.includes('House (register) equity: £130,000.00'), 'debt row shows register-linked equity');
+    d.querySelector('#tabs button[data-view="assets"]').click();
+    assert(d.getElementById('assets-list').innerHTML.includes('financed · Mortgage'), 'register asset badged as financed');
+    assert(d.getElementById('assets-financed').innerHTML.includes('>register<'), 'financed section marks register link');
+
+    // modal: dropdown lists register assets; choosing hides manual fields
+    d.getElementById('debt-add-btn').click();
+    d.getElementById('dm-asset').checked = true;
+    d.getElementById('dm-asset').dispatchEvent(new dom.window.Event('change', {bubbles:true}));
+    const link = d.getElementById('dm-asset-link');
+    assert([...link.options].some(o=>o.textContent.includes('House')), 'asset dropdown lists register assets with values');
+    link.value='as1';
+    link.dispatchEvent(new dom.window.Event('change', {bubbles:true}));
+    assert(d.getElementById('dm-asset-manual').style.display==='none', 'choosing a register asset hides manual fields');
+    link.value='';
+    link.dispatchEvent(new dom.window.Event('change', {bubbles:true}));
+    assert(d.getElementById('dm-asset-manual').style.display==='', 'manual entry returns when no asset selected');
+
+    // saving with a link nulls manual fields
+    d.getElementById('dm-name').value='Tractor finance';
+    d.getElementById('dm-balance').value='5000';
+    d.getElementById('dm-currency').value='GBP';
+    link.value='as1';
+    d.getElementById('dm-save').click(); await wait(120);
+    const saved = DB.debts.find(x=>x.name==='Tractor finance');
+    assert(saved && saved.asset_id==='as1' && saved.asset_name===null && saved.asset_value===null, 'link saved; manual duplicate fields nulled');
+  }
+
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

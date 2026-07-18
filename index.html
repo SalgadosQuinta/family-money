@@ -745,11 +745,16 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
     <label class="f" style="display:flex;gap:8px;align-items:center;text-transform:none;font-family:var(--font);font-size:13.5px;color:var(--ink)">
       <input type="checkbox" id="dm-asset" style="width:auto"> Aligned to an asset (mortgage, vehicle, farm — building wealth)
     </label>
-    <div class="inline2" id="dm-asset-fields" style="display:none">
-      <div><label class="f" for="dm-asset-name">Asset</label>
-        <input id="dm-asset-name" placeholder="e.g. House, Hilux, Tractor"></div>
-      <div><label class="f" for="dm-asset-value">Estimated asset value</label>
-        <input id="dm-asset-value" type="number" inputmode="decimal" step="0.01" min="0"></div>
+    <div id="dm-asset-fields" style="display:none">
+      <label class="f" for="dm-asset-link">Which asset</label>
+      <select id="dm-asset-link"></select>
+      <div class="inline2" id="dm-asset-manual" style="display:none">
+        <div><label class="f" for="dm-asset-name">Asset</label>
+          <input id="dm-asset-name" placeholder="e.g. House, Hilux, Tractor"></div>
+        <div><label class="f" for="dm-asset-value">Estimated asset value</label>
+          <input id="dm-asset-value" type="number" inputmode="decimal" step="0.01" min="0"></div>
+      </div>
+      <p class="small muted" id="dm-asset-hint" style="margin:6px 0 0">Linking uses the Assets register value — one record, no doubles. Revalue it in the Assets tab.</p>
     </div>
     <div class="inline2">
       <div><label class="f" for="dm-owner-member">In whose name (or family shared)</label>
@@ -2112,20 +2117,21 @@ var App = (function(){
     }).join('') : '';
     var rows = sortRows(state.assets, state.sortAssets);
     el.innerHTML = rows.length ? rows.map(function(a){
-      return '<div class="item"><div><div><strong>' + esc(a.name) + '</strong><span class="badge">' + esc(a.category || 'General') + '</span></div>' +
+      var financedBy = state.debts.find(function(dd){ return dd.asset_id === a.id; });
+      return '<div class="item"><div><div><strong>' + esc(a.name) + '</strong><span class="badge">' + esc(a.category || 'General') + '</span>' + (financedBy ? '<span class="badge brass">financed · ' + esc(financedBy.name) + '</span>' : '') + '</div>' +
         '<div class="small muted">' + esc(a.owner_name) + ' · valued ' + esc(fmtDate(a.valued_at)) +
         (a.notes ? ' · ' + esc(a.notes) : '') + '</div>' +
         '<div class="list-actions"><button class="linkbtn" data-act="asedit" data-id="' + esc(a.id) + '">Edit / revalue</button></div></div>' +
         '<div class="amount" style="color:var(--green)">' + esc(fmtMoney(a.value, a.currency)) + '</div></div>';
     }).join('') : '<div class="empty">No assets recorded yet. Add the farm, vehicles, property — anything with a value worth tracking.</div>';
     var fin = $('assets-financed');
-    var financed = state.debts.filter(function(d){ return d.asset_backed && d.asset_value != null; });
+    var financed = state.debts.filter(function(d){ return d.asset_backed; });
     fin.innerHTML = financed.length ? financed.map(function(d){
-      var eq = Number(d.asset_value) - Number(d.balance);
-      return '<div class="item"><div><strong>' + esc(d.asset_name || d.name) + '</strong>' +
+      var ai = debtAssetInfo(d), eq = debtEquity(d);
+      return '<div class="item"><div><strong>' + esc(ai ? ai.name : d.name) + '</strong>' + (ai && ai.linked ? '<span class="badge">register</span>' : '') +
         '<div class="small muted">' + esc(d.owner_name) + ' · financed via ' + esc(d.name) + '</div></div>' +
-        '<div style="text-align:right"><div class="amount">' + esc(fmtMoney(d.asset_value, d.currency)) + '</div>' +
-        '<div class="small" style="color:var(--green)">equity ' + esc(fmtMoney(eq, d.currency)) + '</div></div></div>';
+        '<div style="text-align:right">' + (ai && ai.value != null ? '<div class="amount">' + esc(fmtMoney(ai.value, ai.currency)) + '</div>' : '') +
+        (eq ? '<div class="small" style="color:var(--green)">equity ' + esc(fmtMoney(eq.equity, eq.currency)) + '</div>' : '') + '</div></div>';
     }).join('') : '<div class="empty">None — asset-backed debts appear here automatically.</div>';
   }
   function openAssetModal(a){
@@ -2165,6 +2171,24 @@ var App = (function(){
      .catch(function(e){ errEl.textContent = e.message; errEl.style.display=''; });
   }
 
+  // Linked register asset wins; manual name/value only when no link exists.
+  function debtAssetInfo(d){
+    if(!d.asset_backed) return null;
+    if(d.asset_id){
+      var a = state.assets.find(function(x){ return x.id === d.asset_id; });
+      if(a) return {name:a.name, value:Number(a.value), currency:a.currency, linked:true};
+      return {name:'(linked asset)', value:null, currency:d.currency, linked:true};
+    }
+    if(d.asset_value != null) return {name:d.asset_name || 'Asset', value:Number(d.asset_value), currency:d.currency, linked:false};
+    return {name:d.asset_name || 'Asset', value:null, currency:d.currency, linked:false};
+  }
+  function debtEquity(d){
+    var ai = debtAssetInfo(d);
+    if(!ai || ai.value == null) return null;
+    if(ai.currency !== d.currency) return null; // different currencies — no single equity number
+    return {equity: ai.value - Number(d.balance), value: ai.value, name: ai.name, currency: d.currency};
+  }
+
   /* ---------------- debts ---------------- */
   function renderDebts(){
     var el = $('debts-list');
@@ -2177,7 +2201,8 @@ var App = (function(){
         : proj ? ('Clears in ~' + proj.months + ' months' + (proj.interest > 0.5 ? ' (' + fmtMoney(proj.interest, d.currency) + ' interest)' : ''))
         : 'Set a monthly payment to see the payoff date';
       var typeLabel = d.debt_type === 'credit_card' ? 'Credit card' : d.debt_type === 'informal' ? 'Informal' : 'Loan';
-      var equity = (d.asset_backed && d.asset_value != null) ? (Number(d.asset_value) - Number(d.balance)) : null;
+      var eq = debtEquity(d);
+      var ai = debtAssetInfo(d);
       return '<div class="item"><div>' +
         '<div><strong>' + esc(d.name) + '</strong><span class="badge">' + esc(typeLabel) + '</span>' +
           (d.asset_backed ? '<span class="badge" style="border-color:var(--green);color:var(--green)">Asset</span>' : '') +
@@ -2186,7 +2211,7 @@ var App = (function(){
           (Number(d.interest_rate) ? ' · ' + esc(String(d.interest_rate)) + '% APR' : '') +
           (d.due_day ? ' · due day ' + esc(String(d.due_day)) : '') + '</div>' +
         '<div class="small muted">' + esc(projTxt) + '</div>' +
-        (equity !== null ? '<div class="small" style="color:var(--green)">' + esc(d.asset_name || 'Asset') + ' equity: ' + esc(fmtMoney(equity, d.currency)) + (Number(d.asset_value) ? ' of ' + esc(fmtMoney(d.asset_value, d.currency)) : '') + '</div>' : '') +
+        (eq ? '<div class="small" style="color:var(--green)">' + esc(eq.name) + (ai && ai.linked ? ' (register)' : '') + ' equity: ' + esc(fmtMoney(eq.equity, eq.currency)) + ' of ' + esc(fmtMoney(eq.value, eq.currency)) + '</div>' : (ai && ai.value != null ? '<div class="small muted">' + esc(ai.name) + ' valued ' + esc(fmtMoney(ai.value, ai.currency)) + ' (different currency to the debt)</div>' : '')) +
         '<div class="list-actions">' +
           '<button class="linkbtn" data-act="dpay" data-id="' + esc(d.id) + '">Record payment</button>' +
           '<button class="linkbtn" data-act="dedit" data-id="' + esc(d.id) + '">Edit</button>' +
@@ -2214,14 +2239,15 @@ var App = (function(){
     var groups = {asset:{}, consumer:{}};
     var equityTot = {};
     state.debts.forEach(function(d){
+      var eq = debtEquity(d);
       if(!(Number(d.balance) > 0)){
-        if(d.asset_backed && d.asset_value != null) equityTot[d.currency] = (equityTot[d.currency]||0) + Number(d.asset_value);
+        if(eq) equityTot[eq.currency] = (equityTot[eq.currency]||0) + eq.value;
         return;
       }
       var g = d.asset_backed ? groups.asset : groups.consumer;
       g[d.owner_name] = g[d.owner_name] || {};
       g[d.owner_name][d.currency] = (g[d.owner_name][d.currency] || 0) + Number(d.balance);
-      if(d.asset_backed && d.asset_value != null) equityTot[d.currency] = (equityTot[d.currency]||0) + (Number(d.asset_value) - Number(d.balance));
+      if(eq) equityTot[eq.currency] = (equityTot[eq.currency]||0) + eq.equity;
     });
     var byOwner = groups.consumer;
     var thisM = todayISO().slice(0,7), paidDown = {};
@@ -2261,6 +2287,14 @@ var App = (function(){
     $('dm-minpay').value = d ? d.min_payment : '';
     $('dm-dueday').value = d && d.due_day ? d.due_day : '';
     $('dm-account').value = d && d.account_id ? d.account_id : '';
+    var link = $('dm-asset-link');
+    link.innerHTML = '<option value="">— Not in the register (enter manually) —</option>' +
+      state.assets.map(function(a){
+        return '<option value="' + esc(a.id) + '">' + esc(a.name) + ' (' + esc(fmtMoney(a.value, a.currency)) + ')</option>';
+      }).join('');
+    link.value = d && d.asset_id ? d.asset_id : '';
+    $('dm-asset-manual').style.display = (d && d.asset_backed && !d.asset_id) || (!d) ? '' : 'none';
+    if(link.value) $('dm-asset-manual').style.display = 'none';
     $('dm-asset').checked = !!(d && d.asset_backed);
     $('dm-asset-name').value = d ? (d.asset_name || '') : '';
     $('dm-asset-value').value = d && d.asset_value != null ? d.asset_value : '';
@@ -2285,8 +2319,9 @@ var App = (function(){
       due_day:(dd >= 1 && dd <= 31) ? dd : null,
       account_id:($('dm-account').value || null), notes:($('dm-notes').value.trim() || null),
       asset_backed: $('dm-asset').checked,
-      asset_name: $('dm-asset').checked ? ($('dm-asset-name').value.trim() || null) : null,
-      asset_value: $('dm-asset').checked && $('dm-asset-value').value !== '' ? (parseFloat($('dm-asset-value').value) || 0) : null,
+      asset_id: $('dm-asset').checked ? ($('dm-asset-link').value || null) : null,
+      asset_name: $('dm-asset').checked && !$('dm-asset-link').value ? ($('dm-asset-name').value.trim() || null) : null,
+      asset_value: $('dm-asset').checked && !$('dm-asset-link').value && $('dm-asset-value').value !== '' ? (parseFloat($('dm-asset-value').value) || 0) : null,
       updated_at:new Date().toISOString()
     };
     var p = state.editingDebt
@@ -2657,7 +2692,7 @@ var App = (function(){
     function bump(c, v){ nw[c] = (nw[c] || 0) + v; }
     state.assets.forEach(function(a){ bump(a.currency, Number(a.value)); });
     state.debts.forEach(function(d){
-      if(d.asset_backed && d.asset_value != null) bump(d.currency, Number(d.asset_value));
+      if(d.asset_backed && !d.asset_id && d.asset_value != null) bump(d.currency, Number(d.asset_value));
       bump(d.currency, -Number(d.balance));
     });
     return nw;
@@ -3117,6 +3152,7 @@ var App = (function(){
     $('debt-add-btn').addEventListener('click', function(){ openDebtModal(null); });
     $('dm-save').addEventListener('click', saveDebt);
     $('dm-asset').addEventListener('change', function(){ $('dm-asset-fields').style.display = this.checked ? '' : 'none'; });
+    $('dm-asset-link').addEventListener('change', function(){ $('dm-asset-manual').style.display = this.value ? 'none' : ''; });
     $('dp-save').addEventListener('click', saveDebtPayment);
     $('acct-add-btn').addEventListener('click', function(){ openAcctModal(null); });
     $('am-save').addEventListener('click', saveAcct);
@@ -3258,7 +3294,7 @@ var App = (function(){
     fridayOf:fridayOf, weeksOfMonth:weeksOfMonth, weekTotals:weekTotals, shiftMonth:shiftMonth,
     moveCard:moveCard, mapCaptureResponse:mapCaptureResponse, renderPlanner:renderPlanner,
     accountBalance:accountBalance, payoffProjection:payoffProjection, monthlyClose:monthlyClose,
-    netWorth:netWorth, renderAssets:renderAssets, lineChart:lineChart, seriesFor:seriesFor, takeSnapshots:takeSnapshots, renderNetWorth:renderNetWorth,
+    netWorth:netWorth, renderAssets:renderAssets, debtAssetInfo:debtAssetInfo, debtEquity:debtEquity, lineChart:lineChart, seriesFor:seriesFor, takeSnapshots:takeSnapshots, renderNetWorth:renderNetWorth,
     hashPin:hashPin, pinRequired:pinRequired, tryUnlock:tryUnlock, nextPlannerWeek:nextPlannerWeek,
     privateUnlocked:privateUnlocked, requirePrivatePin:requirePrivatePin, requireSpacePin:requireSpacePin, savePinSetting:savePinSetting, materialiseIncome:materialiseIncome,
     currentSpace:currentSpace, spaceFilter:spaceFilter, spaceBody:spaceBody, setSpace:setSpace, switchSpace:switchSpace, goToSpace:goToSpace, moveSpace:moveSpace,
