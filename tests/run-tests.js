@@ -95,6 +95,11 @@ function mockFetch(url, opts){
     if(method==='GET') return j(DB.snapshots||[]);
     if(method==='POST'){ DB.snapshots=(DB.snapshots||[]).concat(JSON.parse(opts.body)); return j(null,201); }
   }
+  if(url.includes('/rest/v1/fam_space_grants')){
+    if(method==='GET') return j(DB.grants||[]);
+    if(method==='POST'){ DB.grants=(DB.grants||[]); DB.grants.push(JSON.parse(opts.body)); return j(null,201); }
+    if(method==='DELETE'){ const u=/user_id=eq\.([^&]+)/.exec(url)[1]; DB.grants=(DB.grants||[]).filter(g=>g.user_id!==u); return j(null,204); }
+  }
   if(url.includes('/rest/v1/fam_settings')){
     if(method==='GET') return j(DB.settings||[]);
     if(method==='POST'){ DB.settings=[{key:'manual_rates', value:JSON.parse(opts.body).value}]; return j(null,201); }
@@ -585,9 +590,8 @@ const wait = ms => new Promise(r=>setTimeout(r, ms));
     const post = reqs.find(r=>r.url.includes('fam_bills') && r.method==='POST');
     assert(post && JSON.parse(post.body).space === 'private' && JSON.parse(post.body).space_owner === UID, 'private bill POSTed with space + owner');
 
-    // Cycle continues through business (admin) and back to family
-    await A.switchSpace(); await wait(80); // -> business
-    await A.switchSpace(); await wait(80); // -> family
+    // Cycle continues however many spaces exist, back to family
+    for(let i=0;i<5 && A.currentSpace()!=='family';i++){ await A.switchSpace(); await wait(60); }
     assert(A.currentSpace() === 'family' && d.getElementById('tab-admin').textContent === 'Admin', 'toggle returns to family; tab reverts to Admin');
     const fb = A.spaceBody({name:'y'});
     assert(fb.space === 'family' && fb.space_owner === null, 'spaceBody stamps family with no owner');
@@ -672,10 +676,11 @@ const wait = ms => new Promise(r=>setTimeout(r, ms));
     const b = A.spaceBody({name:'x'});
     assert(b.space==='business' && b.space_owner===null, 'business rows stamped without individual owner');
     assert(d.getElementById('tab-admin').textContent==='Setup' && d.getElementById('tab-admin').style.display!=='none', 'business space has Setup tab');
-    await A.switchSpace(); assert(A.currentSpace()==='family', 'cycle 3: back to family');
+    for(let i=0;i<5 && A.currentSpace()!=='family';i++){ await A.switchSpace(); }
+    assert(A.currentSpace()==='family', 'cycle wraps back to family');
 
     // non-admin never reaches business
-    A.state.isAdmin = false;
+    A.state.isAdmin = false; A.state.farmGranted = false;
     await A.switchSpace(); assert(A.currentSpace()==='private', 'member cycle 1: private');
     await A.switchSpace(); assert(A.currentSpace()==='family', 'member cycle 2: family (business skipped)');
     A.setSpace('business');
@@ -705,6 +710,50 @@ const wait = ms => new Promise(r=>setTimeout(r, ms));
     assert(d.getElementById('pl-cal').style.display === '' && d.getElementById('pl-board').style.display === 'none', 'calendar mode swaps views');
     A.setPlannerMode('weeks');
     assert(d.getElementById('pl-board').style.display === '', 'weeks mode restores board');
+  }
+
+
+  console.log('--- TRJ Farms space ---');
+  {
+    DB.settings=[]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[];
+    const reqs=[];
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){
+        w.fetch = function(url, opts){ reqs.push({url, method:(opts&&opts.method)||'GET', body:opts&&opts.body}); return mockFetch(url, opts); };
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}}));
+      }});
+    await wait(200);
+    const d = dom.window.document, A = dom.window.App;
+    // admin cycle now includes farm
+    await A.switchSpace(); await A.switchSpace(); // private -> business
+    reqs.length=0;
+    await A.switchSpace(); await wait(80); // -> farm
+    assert(A.currentSpace()==='farm', 'admin cycle reaches TRJ Farms');
+    assert(reqs.some(r=>r.url.includes('fam_bills') && r.url.includes('space=eq.farm')), 'farm loads filtered to space=farm');
+    assert(d.getElementById('space-badge').textContent==='TRJ FARMS', 'TRJ FARMS badge shown');
+    assert(A.spaceBody({}).space==='farm', 'farm rows stamped with farm space');
+    await A.switchSpace(); assert(A.currentSpace()==='family', 'cycle wraps to family');
+
+    // granted non-admin reaches farm but not business
+    A.state.isAdmin=false; A.state.farmGranted=true;
+    await A.switchSpace(); assert(A.currentSpace()==='private', 'granted member: private');
+    await A.switchSpace(); assert(A.currentSpace()==='farm', 'granted member reaches farm, business skipped');
+    await A.switchSpace(); assert(A.currentSpace()==='family', 'granted member wraps to family');
+    // ungranted member never reaches farm
+    A.state.farmGranted=false;
+    A.setSpace('farm'); assert(A.currentSpace()==='family', 'setSpace refuses farm without grant');
+    A.state.isAdmin=true;
+
+    // grant checkbox in admin drives fam_space_grants
+    A.state.farmGrants=[]; A.renderAdmin();
+    const cb = d.querySelector('[data-farmgrant="' + UID2 + '"]');
+    assert(cb !== null, 'farm access checkbox shown for non-admin member');
+    reqs.length=0;
+    cb.checked = true;
+    cb.dispatchEvent(new dom.window.Event('change', {bubbles:true}));
+    await wait(80);
+    const post = reqs.find(r=>r.url.includes('fam_space_grants') && r.method==='POST');
+    assert(post && JSON.parse(post.body).user_id===UID2 && JSON.parse(post.body).space==='farm', 'ticking grants farm access');
   }
 
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');

@@ -12,12 +12,14 @@
 :root{
   --bg:#0f1216; --panel:#171b21; --panel2:#1d222a; --line:#262c35;
   --ink:#e8e6e1; --muted:#9aa3ad; --brass:#c9a227; --brass-dim:#8f7a2a;
-  --red:#e05252; --green:#4caf7d; --purple:#8a63b8; --radius:10px;
+  --red:#e05252; --green:#4caf7d; --purple:#8a63b8; --farm:#d98a3d; --radius:10px;
   --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
 }
 header{border-bottom:2px solid var(--brass)}
 [data-space="private"] header{border-bottom-color:var(--purple)}
+[data-space="business"] header{border-bottom-color:var(--green)}
+[data-space="farm"] header{border-bottom-color:var(--farm)}
 [data-space="private"] .eyebrow{color:var(--purple)}
 [data-theme="light"]{
   --bg:#f2f0ea; --panel:#ffffff; --panel2:#f7f5ef; --line:#ddd8cc;
@@ -435,6 +437,11 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
       <div id="ad-accounts"></div>
     </div>
     <div class="panel fam-only">
+      <h2>TRJ Farms access</h2>
+      <p class="small muted" style="margin-top:0">Members ticked here can enter and see the TRJ Farms space. Family, private and business data stay unaffected.</p>
+      <div id="ad-farm-grants"></div>
+    </div>
+    <div class="panel fam-only">
       <h2>Manual exchange rates</h2>
       <p class="small muted" style="margin-top:0">ZWG has no public daily feed, so set the rate here for the indicative ≈USD figures. Update it whenever the street rate moves.</p>
       <div class="inline2">
@@ -823,7 +830,9 @@ var App = (function(){
     sortExpenses: 'spent_at',
     sortDebts: 'balance',
     snapshots: [],
-    settings: {}
+    settings: {},
+    farmGranted: false,
+    farmGrants: []
   };
 
   /* ---------------- utilities ---------------- */
@@ -1074,6 +1083,7 @@ var App = (function(){
     var sp = currentSpace();
     if(sp === 'private') return '&space=eq.private&space_owner=eq.' + state.session.user.id;
     if(sp === 'business') return '&space=eq.business';
+    if(sp === 'farm') return '&space=eq.farm';
     return '&space=eq.family';
   }
   function spaceBody(obj){
@@ -1081,19 +1091,20 @@ var App = (function(){
     obj.space_owner = currentSpace() === 'private' ? state.session.user.id : null;
     return obj;
   }
-  function spaceLabel(sp){ return sp === 'private' ? 'Private' : sp === 'business' ? 'Business' : 'Family'; }
+  function spaceLabel(sp){ return sp === 'private' ? 'Private' : sp === 'business' ? 'Business' : sp === 'farm' ? 'TRJ Farms' : 'Family'; }
   function setSpace(sp){
     if(sp === 'business' && !state.isAdmin) sp = 'family';
+    if(sp === 'farm' && !(state.isAdmin || state.farmGranted)) sp = 'family';
     state.space = sp;
     localStorage.setItem('fm_space', sp);
-    var col = sp === 'private' ? 'var(--purple)' : sp === 'business' ? 'var(--green)' : 'var(--brass)';
+    var col = sp === 'private' ? 'var(--purple)' : sp === 'business' ? 'var(--green)' : sp === 'farm' ? 'var(--farm)' : 'var(--brass)';
     var sb = $('space-btn');
     sb.textContent = 'Space: ' + spaceLabel(sp);
     sb.style.borderColor = col; sb.style.color = col;
     document.documentElement.setAttribute('data-space', sp);
     var badge = $('space-badge');
     badge.style.display = sp === 'family' ? 'none' : '';
-    badge.textContent = sp.toUpperCase();
+    badge.textContent = sp === 'farm' ? 'TRJ FARMS' : sp.toUpperCase();
     badge.style.borderColor = col; badge.style.color = col;
     var adminTab = $('tab-admin');
     adminTab.textContent = sp === 'family' ? 'Admin' : 'Setup';
@@ -1102,11 +1113,13 @@ var App = (function(){
   }
   function switchSpace(){
     // Cycle: family -> private -> (business, admins only) -> family
-    var order = state.isAdmin ? ['family','private','business'] : ['family','private'];
+    var order = ['family','private'];
+    if(state.isAdmin) order.push('business');
+    if(state.isAdmin || state.farmGranted) order.push('farm');
     var sp = order[(order.indexOf(currentSpace()) + 1) % order.length];
     setSpace(sp);
     if(state.view === 'admin' && sp === 'family' && !state.isAdmin) setView('dashboard');
-    toast(sp === 'private' ? 'Your private space — only you can see this.' : sp === 'business' ? 'Business space — visible to you alone.' : 'Shared family space.');
+    toast(sp === 'private' ? 'Your private space — only you can see this.' : sp === 'business' ? 'Business space — visible to you alone.' : sp === 'farm' ? 'TRJ Farms — shared with those granted access.' : 'Shared family space.');
     return Promise.all([loadBills(), loadPayments(), loadExpenses(), loadPlanner(),
       loadAccounts(), loadDebts(), loadDebtPayments(), loadBudgets(), loadSnapshots()])
       .then(function(){ return takeSnapshots(); })
@@ -1138,6 +1151,14 @@ var App = (function(){
     });
   }
 
+  function loadGrants(){
+    return apiJSON('/rest/v1/fam_space_grants?select=space,user_id')
+      .then(function(rows){
+        state.farmGrants = (rows || []).filter(function(r){ return r.space === 'farm'; });
+        state.farmGranted = state.farmGrants.some(function(r){ return r.user_id === state.session.user.id; });
+      })
+      .catch(function(){ state.farmGrants = []; state.farmGranted = false; });
+  }
   function loadMembers(){
     return apiJSON('/rest/v1/fam_members?select=user_id,role').then(function(rows){
       state.members = rows || [];
@@ -2095,6 +2116,18 @@ var App = (function(){
     $('tab-admin').style.display = (sp !== 'family' || state.isAdmin) ? '' : 'none';
     document.querySelectorAll('.fam-only').forEach(function(el){ el.style.display = sp === 'family' ? '' : 'none'; });
     if(sp === 'family' && !state.isAdmin) return;
+    if(sp === 'family'){
+      var fg = $('ad-farm-grants');
+      if(fg) fg.innerHTML = state.members.map(function(m){
+        var granted = state.farmGrants.some(function(g){ return g.user_id === m.user_id; });
+        var self = m.user_id === state.session.user.id;
+        return '<div class="item"><div><strong>' + esc(memberName(m.user_id)) + '</strong>' +
+          (m.role === 'admin' ? '<span class="badge brass">Admin — always has access</span>' : '') + '</div>' +
+          (m.role === 'admin' ? '' :
+            '<label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" style="width:auto" data-farmgrant="' + esc(m.user_id) + '"' + (granted ? ' checked' : '') + '> Farm access</label>') +
+          '</div>';
+      }).join('');
+    }
     if($('rate-zwg') && document.activeElement !== $('rate-zwg')) $('rate-zwg').value = ((state.settings.manual_rates || {}).ZWG) || '';
     $('ad-members').innerHTML = state.members.map(function(m){
       return '<div class="item"><div><strong>' + esc(memberName(m.user_id)) + '</strong>' +
@@ -2342,7 +2375,7 @@ var App = (function(){
     });
     var nw = netWorth();
     Object.keys(nw).forEach(function(c){
-      rows.push({kind:'networth', ref_id: currentSpace() === 'private' ? 'net-' + state.session.user.id : currentSpace() === 'business' ? 'net-biz' : 'net', label:'Net worth', owner_name: currentSpace() === 'private' ? 'Private' : 'Family', currency:c, value:nw[c]});
+      rows.push({kind:'networth', ref_id: currentSpace() === 'private' ? 'net-' + state.session.user.id : currentSpace() === 'business' ? 'net-biz' : currentSpace() === 'farm' ? 'net-farm' : 'net', label:'Net worth', owner_name: currentSpace() === 'private' ? 'Private' : 'Family', currency:c, value:nw[c]});
     });
     rows = rows.map(spaceBody);
     if(!rows.length){ localStorage.setItem(snapKey, todayISO()); return Promise.resolve(); }
@@ -2367,7 +2400,7 @@ var App = (function(){
     }
     // main chart: strongest-history currency
     var best = null, bestLen = 1;
-    var netRef = currentSpace() === 'private' ? 'net-' + state.session.user.id : currentSpace() === 'business' ? 'net-biz' : 'net';
+    var netRef = currentSpace() === 'private' ? 'net-' + state.session.user.id : currentSpace() === 'business' ? 'net-biz' : currentSpace() === 'farm' ? 'net-farm' : 'net';
     ccys.forEach(function(c){ var srs = seriesFor('networth',netRef,c); if(srs.length > bestLen){ best = c; bestLen = srs.length; } });
     $('nw-chart').innerHTML = best ? lineChart(seriesFor('networth',netRef,best), 320, 64, {label:'Net worth ' + best, negBad:false}) : lineChart(null,0,0,{});
     $('nw-note').textContent = 'Asset values − debt balances. A daily snapshot is taken on first open.';
@@ -2691,6 +2724,16 @@ var App = (function(){
         .catch(function(e){ toast(e.message); });
     });
     $('ad-mem-add').addEventListener('click', addMemberByEmail);
+    document.getElementById('ad-farm-grants').addEventListener('change', function(e){
+      var t = e.target.closest('[data-farmgrant]'); if(!t) return;
+      var uid = t.getAttribute('data-farmgrant');
+      var p = t.checked
+        ? apiJSON('/rest/v1/fam_space_grants', {method:'POST', headers:{'Prefer':'return=minimal,resolution=ignore-duplicates'},
+            body:JSON.stringify({space:'farm', user_id:uid})})
+        : apiJSON('/rest/v1/fam_space_grants?space=eq.farm&user_id=eq.' + uid, {method:'DELETE'});
+      p.then(function(){ toast(t.checked ? 'Farm access granted.' : 'Farm access removed.'); return loadGrants().then(renderAdmin); })
+       .catch(function(err){ toast(err.message); t.checked = !t.checked; });
+    });
     $('rate-save').addEventListener('click', function(){
       var v = parseFloat($('rate-zwg').value);
       if(!(v > 0)){ toast('Enter a valid rate.'); return; }
@@ -2761,7 +2804,7 @@ var App = (function(){
     setPlannerMode(state.plMode);
     $('ex-date').value = todayISO();
     fillCurrencySelects();
-    return Promise.all([loadMembers(), loadRates()])
+    return Promise.all([loadMembers(), loadRates(), loadGrants()])
       .then(function(){
         showApp(); // re-check membership banner
         if(!state.isMember){ setView('dashboard'); return; }
@@ -2798,6 +2841,7 @@ var App = (function(){
     currentSpace:currentSpace, spaceFilter:spaceFilter, spaceBody:spaceBody, setSpace:setSpace, switchSpace:switchSpace, moveSpace:moveSpace,
     parseCSV:parseCSV, detectRecurring:detectRecurring, nextDueFromDay:nextDueFromDay,
     calendarFlows:calendarFlows, renderCalendar:renderCalendar, setPlannerMode:setPlannerMode, spaceLabel:spaceLabel,
+    loadGrants:loadGrants,
     sortRows:sortRows, toCSV:toCSV, exportCSV:exportCSV, runDueChecks:runDueChecks, renderDebts:renderDebts,
     renderAdmin:renderAdmin, renderAnalysis:renderAnalysis, accountName:accountName,
     VAPID_PUBLIC:VAPID_PUBLIC
