@@ -458,13 +458,13 @@ const wait = ms => new Promise(r=>setTimeout(r, ms));
     await wait(200);
     const d = dom.window.document, A = dom.window.App;
     const nw = A.netWorth();
-    assert(nw.GBP === 131000, 'net worth = 1000 account + 280000 asset - 150000 debt');
-    assert(d.getElementById('nw-headline').innerHTML.includes('131,000'), 'net worth headline rendered');
+    assert(nw.GBP === 130000, 'net worth = 280000 asset - 150000 debt (accounts excluded)');
+    assert(d.getElementById('nw-headline').innerHTML.includes('130,000'), 'net worth headline rendered');
     assert(d.getElementById('nw-chart').innerHTML.includes('<svg'), 'net worth trend chart drawn from snapshots');
-    assert(d.getElementById('nw-series').innerHTML.includes('HSBC') && d.getElementById('nw-series').innerHTML.includes('Mortgage'), 'per-account and per-debt tracking rows rendered');
+    assert(!d.getElementById('nw-series').innerHTML.includes('HSBC') && d.getElementById('nw-series').innerHTML.includes('Mortgage'), 'tracking shows debts only (no account rows)');
     // snapshot taken on boot (fm_snap unset -> POST fired), incl networth row
-    assert((DB.snapshots||[]).some(r=>r.kind==='account' && r.ref_id==='a1'), 'daily snapshot wrote account row');
-    assert((DB.snapshots||[]).some(r=>r.kind==='networth' && Number(r.value)===131000), 'daily snapshot wrote net worth row');
+    assert(!(DB.snapshots||[]).some(r=>r.kind==='account'), 'snapshots no longer write account rows');
+    assert((DB.snapshots||[]).some(r=>r.kind==='networth' && Number(r.value)===130000), 'daily snapshot wrote net worth row');
     assert(dom.window.localStorage.getItem('fm_snap_family') === A.todayISO(), 'snapshot deduped for today');
     // chart helper edge cases
     assert(A.lineChart([{v:1}],100,30,{}).includes('Not enough history'), 'single point shows building message');
@@ -597,6 +597,56 @@ const wait = ms => new Promise(r=>setTimeout(r, ms));
     const patches = reqs.filter(r=>r.method==='PATCH');
     assert(patches.some(r=>r.url.includes('fam_bills?id=eq.b2')) && patches.some(r=>r.url.includes('fam_bill_payments?bill_id=eq.b2')), 'moving a bill moves its payment history too');
     assert(patches.every(r=>JSON.parse(r.body).space === 'private'), 'move from family targets private');
+  }
+
+
+  console.log('--- Statement import: CSV parse + recurring detection ---');
+  {
+    const dom = makeDom(); await wait(50);
+    const A = dom.window.App;
+    const q = String.fromCharCode(34);
+    const rows = A.parseCSV('a,b\n' + q + 'x,1' + q + ',' + q + 'he said ' + q+q + 'hi' + q+q + q + '\n2,3\n');
+    assert(rows.length === 3 && rows[1][0] === 'x,1' && rows[1][1] === 'he said ' + q + 'hi' + q, 'CSV parser handles quotes and embedded commas');
+
+    const csv = ['Date,Name,Category,Amount,Currency',
+      '12/04/2026,Disney+,Entertainment,-14.99,GBP',
+      '12/05/2026,Disney+,Entertainment,-14.99,GBP',
+      '13/06/2026,Disney+,Entertainment,-14.99,GBP',
+      '01/05/2026,Sky,Bills,-160.49,GBP',
+      '02/06/2026,Sky,Bills,-160.49,GBP',
+      '03/04/2026,Tesco,Groceries,-52.10,GBP',
+      '19/04/2026,Tesco,Groceries,-8.30,GBP',
+      '25/04/2026,Tesco,Groceries,-91.00,GBP',
+      '10/05/2026,Refund,General,25.00,GBP',
+      '07/04/2026,OneOff,General,-500.00,GBP'].join('\n');
+    const props = A.detectRecurring(A.parseCSV(csv));
+    const names = props.map(p=>p.title);
+    assert(names.includes('Disney+') && names.includes('Sky'), 'monthly subscriptions detected');
+    assert(!names.includes('Tesco'), 'variable multi-per-month spend not proposed');
+    assert(!names.includes('OneOff') && !names.includes('Refund'), 'one-offs and credits excluded');
+    const disney = props.find(p=>p.title==='Disney+');
+    assert(disney.amount === 14.99 && disney.due_day === 12 && disney.months === 3, 'median amount, due day and month count correct');
+    assert(props[0].title === 'Sky', 'proposals sorted biggest first');
+    assert(A.nextDueFromDay(1) >= A.todayISO().slice(0,8) + '01', 'next due date never in the past');
+  }
+
+  console.log('--- Statement import: existing bills filtered on re-import ---');
+  {
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){ w.fetch = mockFetch;
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}})); }});
+    await wait(180);
+    const A = dom.window.App;
+    const csv = ['Date,Name,Category,Amount,Currency',
+      '02/05/2026,Internet,Bills,-80.00,GBP',
+      '02/06/2026,Internet,Bills,-80.00,GBP',
+      '01/05/2026,Sky,Bills,-160.49,GBP',
+      '02/06/2026,Sky,Bills,-160.49,GBP'].join('\n');
+    const props = A.detectRecurring(A.parseCSV(csv));
+    assert(props.some(p=>p.title==='Internet'), 'detector sees the recurring line');
+    const existing = {}; A.state.bills.forEach(b=>existing[b.name.toLowerCase()]=1);
+    const filtered = props.filter(p=>!existing[p.title.toLowerCase()]);
+    assert(!filtered.some(p=>p.title==='Internet') && filtered.some(p=>p.title==='Sky'), 're-import skips bills that already exist');
   }
 
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');

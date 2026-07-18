@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Family Money</title>
+<title>Julius Family Money</title>
 <meta name="theme-color" content="#0f1216">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png">
@@ -12,10 +12,13 @@
 :root{
   --bg:#0f1216; --panel:#171b21; --panel2:#1d222a; --line:#262c35;
   --ink:#e8e6e1; --muted:#9aa3ad; --brass:#c9a227; --brass-dim:#8f7a2a;
-  --red:#e05252; --green:#4caf7d; --radius:10px;
+  --red:#e05252; --green:#4caf7d; --purple:#8a63b8; --radius:10px;
   --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
 }
+header{border-bottom:2px solid var(--brass)}
+[data-space="private"] header{border-bottom-color:var(--purple)}
+[data-space="private"] .eyebrow{color:var(--purple)}
 [data-theme="light"]{
   --bg:#f2f0ea; --panel:#ffffff; --panel2:#f7f5ef; --line:#ddd8cc;
   --ink:#1c1f24; --muted:#6b7280; --brass:#8f7a2a; --brass-dim:#c9a227;
@@ -32,7 +35,7 @@ a{color:var(--brass);text-decoration:none}
 /* Header + tabs (top) */
 header{position:sticky;top:0;z-index:20;background:var(--bg);border-bottom:1px solid var(--line);
   padding:10px 14px 0;padding-top:calc(10px + env(safe-area-inset-top))}
-.hrow{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.hrow{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
 .brand{display:flex;align-items:baseline;gap:8px}
 .brand h1{font-size:16px;margin:0;font-weight:650}
 nav.tabs{display:flex;gap:2px;margin-top:8px;overflow-x:auto;-webkit-overflow-scrolling:touch}
@@ -104,8 +107,8 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
   border-radius:50%;animation:sp .8s linear infinite;vertical-align:-2px}
 
 /* Planner (Kanban) */
-.board{display:flex;gap:12px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:8px}
-.wcol{flex:0 0 240px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+.board{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;padding-bottom:8px}
+.wcol{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
   padding:10px;display:flex;flex-direction:column;min-height:280px}
 .wcol.dragover{border-color:var(--brass);background:var(--panel2)}
 .wcol .whead{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
@@ -145,8 +148,10 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
 
 <div id="signin-view" class="signin" style="display:none">
   <div style="text-align:center;margin-bottom:18px">
-    <div class="eyebrow">Forgiatus</div>
+    <img src="icons/crest-96.png" alt="Julius family crest" width="72" height="72" style="display:block;margin:0 auto 8px">
+    <div class="eyebrow">Julius</div>
     <h1 style="margin:4px 0 0;font-size:22px">Family Money</h1>
+    <div class="small" style="color:var(--purple);font-family:var(--mono);letter-spacing:.08em;margin-top:4px">FORGED FOR STRENGTH · REFINED FOR PURPOSE</div>
   </div>
   <div class="panel">
     <label class="f" for="si-email">Email</label>
@@ -161,7 +166,7 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
 
 <div class="modal-wrap" id="pin-lock" style="z-index:90">
   <div class="modal" style="max-width:320px;text-align:center">
-    <div class="eyebrow">Forgiatus</div>
+    <div class="eyebrow">Julius</div>
     <h3 style="margin:6px 0 2px">Enter PIN</h3>
     <p class="small muted" id="pin-msg" style="margin-top:0">4 digits</p>
     <input id="pin-input" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off"
@@ -188,9 +193,9 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
 <div id="app-view" style="display:none">
 <header>
   <div class="hrow">
-    <div class="brand"><span class="eyebrow">Forgiatus</span><h1>Family Money</h1><span class="badge" id="space-badge" style="display:none;border-color:var(--brass);color:var(--brass)">PRIVATE</span></div>
+    <div class="brand"><img src="icons/crest-96.png" alt="" width="26" height="26" style="align-self:center"><span class="eyebrow">Julius</span><h1>Family Money</h1><span class="badge" id="space-badge" style="display:none;border-color:var(--purple);color:var(--purple)">PRIVATE</span></div>
     <div style="display:flex;gap:6px">
-      <button class="iconbtn" id="space-btn" title="Switch between the shared family space and your private space">Family</button>
+      <button class="iconbtn" id="space-btn" style="border-color:var(--brass);color:var(--brass);font-weight:600" title="Switch between the shared family space and your private space">Space: Family</button>
       <button class="iconbtn" id="pin-btn" title="Finance PIN">PIN</button>
       <button class="iconbtn" id="theme-btn" title="Toggle theme">◐</button>
       <button class="iconbtn" id="signout-btn" title="Sign out">Sign out</button>
@@ -222,7 +227,7 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
       <div class="small muted" id="nw-note"></div>
     </div>
     <div class="panel">
-      <h2>Tracking — accounts &amp; debts over time</h2>
+      <h2>Debt payback — tracking over time</h2>
       <div id="nw-series"></div>
     </div>
     <div class="panel">
@@ -272,6 +277,12 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
       </div>
     </div>
     <div class="panel"><div id="bills-list"><div class="empty">Loading…</div></div></div>
+    <div class="panel">
+      <h2>Import bank statement</h2>
+      <p class="small muted" style="margin-top:0">Upload a statement CSV (Monzo or similar). Recurring payments are detected and proposed as monthly bills — nothing is added until you approve it. Items land in the space you're currently in.</p>
+      <input type="file" id="stmt-file" accept=".csv,text/csv">
+      <div id="stmt-status" class="small muted" style="margin-top:6px"></div>
+    </div>
     <div class="panel">
       <h2>Recent payments</h2>
       <div id="payments-list"><div class="empty">Loading…</div></div>
@@ -407,7 +418,7 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
     </div>
     <div class="panel">
       <div class="row"><h2>Accounts</h2><button class="btn" id="acct-add-btn">Add account</button></div>
-      <p class="small muted" style="margin-top:0">Bank, cash, mobile money, credit card, intermediary and personal accounts. Balances are worked out from tagged transactions.</p>
+      <p class="small muted" style="margin-top:0">Not bank reconciliation — these mark money held by people or in transit: floats held by a family member, cash pots, money with an intermediary. Tag payments with them so held money is traceable.</p>
       <div id="ad-accounts"></div>
     </div>
     <div class="panel fam-only">
@@ -572,6 +583,20 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
   </div>
 </div>
 
+<!-- Statement import review modal -->
+<div class="modal-wrap" id="stmt-modal">
+  <div class="modal" style="max-width:600px">
+    <h3>Recurring payments found</h3>
+    <p class="small muted" style="margin-top:0">Approve the ones to add as monthly bills; untick to decline. Amounts are the median seen; adjust anything before adding.</p>
+    <div id="stmt-props" style="max-height:55vh;overflow-y:auto"></div>
+    <div id="stmt-err" class="small" style="color:var(--red);margin-top:8px;display:none"></div>
+    <div class="btnrow">
+      <button class="btn ghost" data-close="stmt-modal">Cancel</button>
+      <button class="btn primary" id="stmt-add">Add approved</button>
+    </div>
+  </div>
+</div>
+
 <!-- AI capture review modal -->
 <div class="modal-wrap" id="cap-modal">
   <div class="modal" style="max-width:560px">
@@ -680,9 +705,9 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
     <div class="inline2">
       <div><label class="f" for="am-type">Type</label>
         <select id="am-type">
-          <option value="bank">Bank</option><option value="cash">Cash</option>
-          <option value="mobile">Mobile money</option><option value="credit_card">Credit card</option>
-          <option value="intermediary">Intermediary / transit</option><option value="personal">Personal</option>
+          <option value="personal">Held by a person</option><option value="cash">Cash pot</option>
+          <option value="intermediary">Intermediary / in transit</option><option value="mobile">Mobile money</option>
+          <option value="credit_card">Credit card</option><option value="bank">Other</option>
         </select></div>
       <div><label class="f" for="am-currency">Currency</label>
         <select id="am-currency"></select></div>
@@ -1045,7 +1070,11 @@ var App = (function(){
   function setSpace(sp){
     state.space = sp;
     localStorage.setItem('fm_space', sp);
-    $('space-btn').textContent = sp === 'private' ? 'Private' : 'Family';
+    var sb = $('space-btn');
+    sb.textContent = sp === 'private' ? 'Space: Private' : 'Space: Family';
+    sb.style.borderColor = sp === 'private' ? 'var(--purple)' : 'var(--brass)';
+    sb.style.color = sp === 'private' ? 'var(--purple)' : 'var(--brass)';
+    document.documentElement.setAttribute('data-space', sp);
     $('space-badge').style.display = sp === 'private' ? '' : 'none';
     var adminTab = $('tab-admin');
     adminTab.textContent = sp === 'private' ? 'Setup' : 'Admin';
@@ -1525,6 +1554,127 @@ var App = (function(){
      .catch(function(e){ errEl.textContent = e.message; errEl.style.display=''; });
   }
 
+  /* ---------------- statement import (CSV) ---------------- */
+  function parseCSV(text){
+    var rows = [], row = [], cur = '', inQ = false;
+    for(var i = 0; i < text.length; i++){
+      var ch = text[i];
+      if(inQ){
+        if(ch === '"'){ if(text[i+1] === '"'){ cur += '"'; i++; } else inQ = false; }
+        else cur += ch;
+      } else if(ch === '"') inQ = true;
+      else if(ch === ','){ row.push(cur); cur = ''; }
+      else if(ch === '\n' || ch === '\r'){
+        if(ch === '\r' && text[i+1] === '\n') i++;
+        row.push(cur); cur = '';
+        if(row.length > 1 || row[0] !== '') rows.push(row);
+        row = [];
+      }
+      else cur += ch;
+    }
+    if(cur !== '' || row.length){ row.push(cur); rows.push(row); }
+    return rows;
+  }
+  function medianOf(arr){
+    var a = arr.slice().sort(function(x,y){ return x - y; });
+    var m = Math.floor(a.length / 2);
+    return a.length % 2 ? a[m] : (a[m-1] + a[m]) / 2;
+  }
+  // Detect roughly-monthly outgoings from parsed statement rows
+  function detectRecurring(rows){
+    if(!rows.length) return [];
+    var head = rows[0].map(function(h){ return h.trim().toLowerCase(); });
+    function col(names){ for(var i = 0; i < names.length; i++){ var ix = head.indexOf(names[i]); if(ix >= 0) return ix; } return -1; }
+    var cDate = col(['date']), cName = col(['name','description','merchant','payee']),
+        cAmt = col(['amount']), cOut = col(['money out']), cCat = col(['category']), cCcy = col(['currency']);
+    if(cDate < 0 || (cAmt < 0 && cOut < 0)) return [];
+    var groups = {};
+    rows.slice(1).forEach(function(r){
+      var name = (cName >= 0 ? r[cName] : '').trim();
+      if(!name) return;
+      var amt = parseFloat(cAmt >= 0 ? r[cAmt] : ('-' + String(r[cOut]).replace(/[^0-9.]/g,'')));
+      if(!(amt < 0)) return; // outgoings only
+      var dm = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/.exec(r[cDate].trim());
+      if(!dm) return;
+      var y = dm[3].length === 2 ? '20' + dm[3] : dm[3];
+      var iso = y + '-' + dm[2].padStart(2,'0') + '-' + dm[1].padStart(2,'0'); // dd/mm/yyyy
+      (groups[name] = groups[name] || []).push({date:iso, day:+dm[1], amt:-amt,
+        cat:(cCat >= 0 ? r[cCat] : '') || 'General', ccy:(cCcy >= 0 && r[cCcy]) ? r[cCcy] : 'GBP'});
+    });
+    var out = [];
+    Object.keys(groups).forEach(function(name){
+      var g = groups[name];
+      var months = {}; g.forEach(function(t){ months[t.date.slice(0,7)] = (months[t.date.slice(0,7)] || 0) + 1; });
+      var mkeys = Object.keys(months);
+      // monthly-ish: seen in 2+ months, ~once per month, amounts within 35% band
+      if(mkeys.length < 2) return;
+      var perMonth = g.length / mkeys.length;
+      if(perMonth > 1.5) return;
+      var amts = g.map(function(t){ return t.amt; });
+      if(Math.max.apply(null, amts) > Math.min.apply(null, amts) * 1.35) return;
+      var med = medianOf(amts);
+      var day = Math.round(medianOf(g.map(function(t){ return t.day; })));
+      var ccy = CURRENCIES.indexOf(g[0].ccy) >= 0 ? g[0].ccy : 'GBP';
+      out.push({title:name, amount:Math.round(med * 100) / 100, currency:ccy, due_day:day,
+        category:g[0].cat, months:mkeys.length, seen:g.length, selected:true});
+    });
+    out.sort(function(a,b){ return b.amount - a.amount; });
+    return out;
+  }
+  function nextDueFromDay(day){
+    var t = new Date(todayISO() + 'T00:00:00');
+    var d = new Date(t.getFullYear(), t.getMonth(), Math.min(day, new Date(t.getFullYear(), t.getMonth()+1, 0).getDate()));
+    if(d <= t){ d = new Date(t.getFullYear(), t.getMonth()+1, 1); var last = new Date(d.getFullYear(), d.getMonth()+1, 0).getDate(); d.setDate(Math.min(day, last)); }
+    return isoOf(d);
+  }
+  var stmtProps = [];
+  function handleStatementFile(file){
+    $('stmt-status').textContent = 'Reading ' + file.name + '…';
+    var reader = new FileReader();
+    reader.onload = function(){
+      // Skip existing bills so re-imports don't duplicate
+      var existing = {};
+      state.bills.forEach(function(b){ existing[b.name.toLowerCase()] = 1; });
+      stmtProps = detectRecurring(parseCSV(String(reader.result)))
+        .filter(function(p){ return !existing[p.title.toLowerCase()]; });
+      $('stmt-status').textContent = '';
+      $('stmt-file').value = '';
+      if(!stmtProps.length){ toast('No new recurring payments found in that statement.'); return; }
+      $('stmt-props').innerHTML = stmtProps.map(function(p, i){
+        return '<div class="prop"><label style="display:flex;gap:8px;align-items:center;font-size:13.5px">' +
+          '<input type="checkbox" style="width:auto" data-st="sel" data-i="' + i + '" checked>' +
+          '<strong>' + esc(p.title) + '</strong>' +
+          '<span class="muted small" style="margin-left:auto">seen ' + p.seen + '× over ' + p.months + ' months</span></label>' +
+          '<div class="inline3">' +
+            '<input value="' + esc(p.category) + '" data-st="category" data-i="' + i + '" list="cat-list">' +
+            '<input type="number" step="0.01" value="' + esc(p.amount) + '" data-st="amount" data-i="' + i + '">' +
+            '<input type="number" min="1" max="31" value="' + esc(p.due_day) + '" data-st="due_day" data-i="' + i + '" title="Day of month due">' +
+          '</div></div>';
+      }).join('');
+      $('stmt-err').style.display = 'none';
+      modalOpen('stmt-modal');
+    };
+    reader.readAsText(file);
+  }
+  function addApprovedStatement(){
+    var sel = stmtProps.filter(function(p){ return p.selected !== false; });
+    if(!sel.length){ modalClose('stmt-modal'); return; }
+    var btn = $('stmt-add'); btn.disabled = true;
+    var posts = sel.map(function(p){
+      return apiJSON('/rest/v1/fam_bills', {method:'POST', headers:{'Prefer':'return=minimal'},
+        body: JSON.stringify(spaceBody({name:p.title, amount:p.amount, currency:p.currency,
+          due_date:nextDueFromDay(p.due_day), recurrence:'monthly',
+          category:p.category || 'General', notes:'Imported from bank statement'}))});
+    });
+    Promise.all(posts).then(function(){
+      modalClose('stmt-modal');
+      toast(sel.length + ' recurring bill' + (sel.length > 1 ? 's' : '') + ' added to the ' + currentSpace() + ' space.');
+      return loadBills().then(renderAll);
+    }).catch(function(e){
+      $('stmt-err').textContent = e.message; $('stmt-err').style.display = '';
+    }).then(function(){ btn.disabled = false; });
+  }
+
   /* ---------------- AI capture ---------------- */
   // Defensive mapping of smart-capture output to planner proposals
   function mapCaptureResponse(j){
@@ -1914,7 +2064,7 @@ var App = (function(){
     fillOwnerSelect('am-owner-member');
     $('am-title').textContent = a ? 'Edit account' : 'Add account';
     $('am-name').value = a ? a.name : '';
-    $('am-type').value = a ? a.acct_type : 'bank';
+    $('am-type').value = a ? a.acct_type : 'personal';
     $('am-currency').value = a ? a.currency : 'GBP';
     $('am-owner-member').value = a && a.owner_member ? a.owner_member : '';
     $('am-owner-name').value = a && !a.owner_member ? a.owner_name : '';
@@ -2067,10 +2217,11 @@ var App = (function(){
 
   /* ---------------- net worth, snapshots & charts ---------------- */
   // Net worth per currency = account balances + asset values (asset-backed debts) - all debt balances
+  // Assets - debts. Accounts are deliberately excluded: they mark money held by
+  // people (floats), not reconciled bank balances.
   function netWorth(){
     var nw = {};
     function bump(c, v){ nw[c] = (nw[c] || 0) + v; }
-    state.accounts.forEach(function(a){ bump(a.currency, accountBalance(a.id)); });
     state.debts.forEach(function(d){
       if(d.asset_backed && d.asset_value != null) bump(d.currency, Number(d.asset_value));
       bump(d.currency, -Number(d.balance));
@@ -2115,9 +2266,6 @@ var App = (function(){
     var snapKey = 'fm_snap_' + currentSpace();
     if(localStorage.getItem(snapKey) === todayISO()) return Promise.resolve();
     var rows = [];
-    state.accounts.forEach(function(a){
-      rows.push({kind:'account', ref_id:a.id, label:a.name, owner_name:a.owner_name, currency:a.currency, value:accountBalance(a.id)});
-    });
     state.debts.forEach(function(d){
       rows.push({kind:'debt', ref_id:d.id, label:d.name, owner_name:d.owner_name, currency:d.currency, value:Number(d.balance)});
     });
@@ -2151,14 +2299,9 @@ var App = (function(){
     var netRef = currentSpace() === 'private' ? 'net-' + state.session.user.id : 'net';
     ccys.forEach(function(c){ var srs = seriesFor('networth',netRef,c); if(srs.length > bestLen){ best = c; bestLen = srs.length; } });
     $('nw-chart').innerHTML = best ? lineChart(seriesFor('networth',netRef,best), 320, 64, {label:'Net worth ' + best, negBad:false}) : lineChart(null,0,0,{});
-    $('nw-note').textContent = 'Accounts + asset values − debts. A daily snapshot is taken on first open.';
+    $('nw-note').textContent = 'Asset values − debt balances. A daily snapshot is taken on first open.';
     // per-account and per-debt sparklines
     var out = '';
-    state.accounts.forEach(function(a){
-      out += '<div class="item"><div><strong>' + esc(a.name) + '</strong><div class="small muted">' + esc(a.owner_name) + ' · account</div></div>' +
-        '<div style="width:130px">' + lineChart(seriesFor('account', a.id, a.currency), 130, 34, {label:a.name}) + '</div>' +
-        '<div class="amount" style="min-width:90px;text-align:right">' + esc(fmtMoney(accountBalance(a.id), a.currency)) + '</div></div>';
-    });
     state.debts.forEach(function(d){
       out += '<div class="item"><div><strong>' + esc(d.name) + '</strong><div class="small muted">' + esc(d.owner_name) + ' · debt' + (d.asset_backed ? ' · asset' : '') + '</div></div>' +
         '<div style="width:130px">' + lineChart(seriesFor('debt', d.id, d.currency).map(function(p){ return {d:p.d, v:-p.v}; }), 130, 34, {label:d.name}) + '</div>' +
@@ -2378,6 +2521,16 @@ var App = (function(){
       moveSpace('pitem', it.id).catch(function(e){ toast(e.message); });
     });
     $('cap-btn').addEventListener('click', runCapture);
+    $('stmt-file').addEventListener('change', function(){ if(this.files[0]) handleStatementFile(this.files[0]); });
+    $('stmt-add').addEventListener('click', addApprovedStatement);
+    $('stmt-props').addEventListener('input', function(e){
+      var t = e.target, i = +t.getAttribute('data-i'), k = t.getAttribute('data-st');
+      if(!stmtProps[i]) return;
+      if(k === 'sel') stmtProps[i].selected = t.checked;
+      else if(k === 'amount') stmtProps[i].amount = parseFloat(t.value) || 0;
+      else if(k === 'due_day') stmtProps[i].due_day = Math.min(31, Math.max(1, parseInt(t.value,10) || 1));
+      else if(k === 'category') stmtProps[i].category = t.value;
+    });
     $('cap-add').addEventListener('click', addCaptured);
     $('pim-del').addEventListener('click', function(){
       var it = state.editingItem; if(!it) return;
@@ -2567,6 +2720,7 @@ var App = (function(){
     netWorth:netWorth, lineChart:lineChart, seriesFor:seriesFor, takeSnapshots:takeSnapshots, renderNetWorth:renderNetWorth,
     hashPin:hashPin, pinRequired:pinRequired, tryUnlock:tryUnlock, nextPlannerWeek:nextPlannerWeek,
     currentSpace:currentSpace, spaceFilter:spaceFilter, spaceBody:spaceBody, setSpace:setSpace, switchSpace:switchSpace, moveSpace:moveSpace,
+    parseCSV:parseCSV, detectRecurring:detectRecurring, nextDueFromDay:nextDueFromDay,
     sortRows:sortRows, toCSV:toCSV, exportCSV:exportCSV, runDueChecks:runDueChecks, renderDebts:renderDebts,
     renderAdmin:renderAdmin, renderAnalysis:renderAnalysis, accountName:accountName,
     VAPID_PUBLIC:VAPID_PUBLIC
