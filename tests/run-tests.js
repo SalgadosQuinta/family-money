@@ -1319,6 +1319,34 @@ async function cycleSpace(dom, A){
     assert(saved.events.task_assigned===true && saved.events.task_updated===true, 'granular event toggles saved');
   }
 
+
+  console.log('--- Backup export ---');
+  {
+    DB.settings=[{key:'manual_rates', value:{ZWG:26}}]; DB.planner=[]; DB.income=[]; DB.accounts=[];
+    DB.debts=[{id:'d1', name:'Mortgage', balance:1, principal:1, currency:'GBP', archived:false}];
+    DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[]; DB.assets=[]; DB.nprefs=[];
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){ w.fetch = mockFetch;
+        w.URL.createObjectURL = ()=>'blob:x'; w.URL.revokeObjectURL = ()=>{};
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}})); }});
+    await wait(200);
+    const d = dom.window.document, A = dom.window.App;
+    assert(A.BACKUP_TABLES.length === 15 && A.BACKUP_TABLES.includes('fam_assets') && A.BACKUP_TABLES.includes('fam_notify_prefs'), 'backup covers all fifteen tables');
+    d.querySelector('#tabs button[data-view="admin"]').click();
+    assert(d.getElementById('backup-btn') !== null, 'Backups card present in Admin');
+    // capture the Blob content
+    let captured = null;
+    dom.window.Blob = function(parts){ captured = parts.join(''); };
+    const count = await A.exportBackup();
+    assert(count > 0, 'export reports row count');
+    const parsed = JSON.parse(captured);
+    assert(parsed.app === 'julius-family-money' && parsed.exported_by === 'r@x.com', 'backup file carries provenance');
+    assert(Array.isArray(parsed.tables.fam_bills) && parsed.tables.fam_bills.length >= 1, 'bills included');
+    assert(Array.isArray(parsed.tables.fam_debts) && parsed.tables.fam_debts[0].name === 'Mortgage', 'debts included');
+    assert(parsed.tables.fam_settings.length === 1, 'settings included');
+    assert(d.getElementById('backup-status').textContent.includes('rows exported'), 'status line reports completion');
+  }
+
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

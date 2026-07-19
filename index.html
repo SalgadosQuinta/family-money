@@ -522,6 +522,12 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
       <div id="ad-farm-grants"></div>
     </div>
     <div class="panel fam-only">
+      <h2>Backups</h2>
+      <p class="small muted" style="margin-top:0">Downloads every table across all spaces you can see into one dated JSON file. Policy: every Sunday, and always before running a migration. Keep it in the julius-money-backups cloud folder. Restore procedure: BACKUP-AND-RESILIENCE.md in the repo.</p>
+      <button class="btn primary" id="backup-btn">Download full backup (JSON)</button>
+      <span class="small muted" id="backup-status" style="margin-left:8px"></span>
+    </div>
+    <div class="panel fam-only">
       <h2>WhatsApp notifications</h2>
       <p class="small muted" style="margin-top:0">Set up per person — they don't need to do anything technical beyond a one-off opt-in from their phone: save <strong>+34&nbsp;644&nbsp;44&nbsp;21&nbsp;48</strong> as a contact, WhatsApp it "I allow callmebot to send me messages", and it replies with their personal API key. Enter it below with their number, switch them on, and tick exactly which events notify them.</p>
       <div id="ad-notify"></div>
@@ -1970,6 +1976,41 @@ var App = (function(){
       : apiJSON('/rest/v1/fam_income', {method:'POST', headers:{'Prefer':'return=minimal'}, body:JSON.stringify(spaceBody(body))});
     p.then(function(){ modalClose('inc-modal'); return loadPlanner().then(renderPlanner); })
      .catch(function(e){ errEl.textContent = e.message; errEl.style.display=''; });
+  }
+
+  /* ---------------- full backup export ---------------- */
+  var BACKUP_TABLES = ['fam_members','fam_accounts','fam_assets','fam_bills','fam_bill_payments',
+    'fam_expenses','fam_income','fam_planner_items','fam_debts','fam_debt_payments',
+    'fam_budgets','fam_settings','fam_space_grants','fam_notify_prefs','fam_snapshots'];
+  function exportBackup(){
+    var st = $('backup-status');
+    st.textContent = 'Exporting…';
+    var out = {app:'julius-family-money', exported_at:new Date().toISOString(),
+      exported_by:state.session.user.email, tables:{}};
+    // Sequential to stay gentle; each table fetched without space filter so the
+    // admin's full visibility (family + business + farm + own private) is included.
+    var chain = Promise.resolve();
+    BACKUP_TABLES.forEach(function(t){
+      chain = chain.then(function(){
+        return apiJSON('/rest/v1/' + t + '?select=*&limit=10000')
+          .then(function(rows){ out.tables[t] = rows || []; })
+          .catch(function(){ out.tables[t] = {error:'table missing or not readable (migration not run?)'}; });
+      });
+    });
+    return chain.then(function(){
+      var counts = Object.keys(out.tables).map(function(t){
+        return Array.isArray(out.tables[t]) ? out.tables[t].length : 0;
+      }).reduce(function(a,b){ return a + b; }, 0);
+      var blob = new Blob([JSON.stringify(out, null, 1)], {type:'application/json'});
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'julius-money-backup-' + todayISO() + '.json';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function(){ URL.revokeObjectURL(a.href); }, 5000);
+      st.textContent = counts + ' rows exported.';
+      toast('Backup downloaded — move it to the backups folder.');
+      return counts;
+    });
   }
 
   /* ---------------- statement import (CSV) ---------------- */
@@ -3465,6 +3506,7 @@ var App = (function(){
       p.then(function(){ toast(t.checked ? 'Farm access granted.' : 'Farm access removed.'); return loadGrants().then(renderAdmin); })
        .catch(function(err){ toast(err.message); t.checked = !t.checked; });
     });
+    $('backup-btn').addEventListener('click', function(){ exportBackup().catch(function(e){ $('backup-status').textContent = e.message; }); });
     $('ad-notify').addEventListener('click', function(e){
       var saveBtn = e.target.closest('[data-npsave]'), testBtn = e.target.closest('[data-nptest]');
       if(!saveBtn && !testBtn) return;
@@ -3611,7 +3653,7 @@ var App = (function(){
     parseCSV:parseCSV, detectRecurring:detectRecurring, nextDueFromDay:nextDueFromDay,
     calendarFlows:calendarFlows, renderCalendar:renderCalendar, setPlannerMode:setPlannerMode, spaceLabel:spaceLabel,
     nextOnDate:nextOnDate, renderDay:renderDay,
-    loadGrants:loadGrants, loadNotifyPrefs:loadNotifyPrefs,
+    loadGrants:loadGrants, loadNotifyPrefs:loadNotifyPrefs, exportBackup:exportBackup, BACKUP_TABLES:BACKUP_TABLES,
     sortRows:sortRows, toCSV:toCSV, exportCSV:exportCSV, runDueChecks:runDueChecks, renderDebts:renderDebts,
     renderAdmin:renderAdmin, renderAnalysis:renderAnalysis, accountName:accountName,
     VAPID_PUBLIC:VAPID_PUBLIC
