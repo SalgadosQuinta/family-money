@@ -1279,7 +1279,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v30';
+  var APP_BUILD = 'v31';
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
      is down we render the last-known data with a visible banner.
@@ -1347,6 +1347,28 @@ var App = (function(){
       if(outbox().length) outboxReplay().then(function(){ if(!outbox().length){ toast('Offline changes synced.'); if(typeof switchSpaceReload === 'function' && state.session) switchSpaceReload(); } });
     }
     offlineBadge();
+  }
+  function renderDiagFooter(){
+    var el = document.getElementById('diag-footer');
+    if(!el){
+      el = document.createElement('div');
+      el.id = 'diag-footer';
+      el.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:rgba(10,10,14,.92);color:#8a8a95;font:11px/1.6 monospace;padding:3px 10px;border-top:1px solid #2a2a33;z-index:999';
+      document.body.appendChild(el);
+    }
+    var base = 'build ' + APP_BUILD + ' \u00b7 ' + (navigator.onLine ? 'online' : 'OFFLINE') +
+      ' \u00b7 bills ' + state.bills.length + ' \u00b7 debts ' + state.debts.length + ' \u00b7 assets ' + state.assets.length +
+      ' \u00b7 space ' + currentSpace();
+    el.textContent = base + ' \u00b7 probing\u2026';
+    fetch(SUPABASE_URL + '/rest/v1/fam_bills?select=id&space=eq.family', {headers:{
+      'apikey': ANON_KEY,
+      'Authorization': 'Bearer ' + (state.session ? state.session.access_token : ANON_KEY)
+    }}).then(function(r){ return r.text().then(function(t){
+      var n = -1; try{ n = (JSON.parse(t)||[]).length; }catch(e){}
+      el.textContent = base + ' \u00b7 raw probe: HTTP ' + r.status + ', ' + (n>=0 ? n + ' rows' : t.slice(0,80));
+    }); }).catch(function(e){
+      el.textContent = base + ' \u00b7 raw probe FAILED: ' + (e.message || 'network');
+    });
   }
   function showLoadFailures(failures){
     var el = document.getElementById('loadfail-banner');
@@ -3836,6 +3858,7 @@ var App = (function(){
             renderAll();
             if(currentSpace() === 'family') runDueChecks();
             showLoadFailures(failures);
+            renderDiagFooter();
           });
       })
       .catch(function(e){ toast(e.message); showLoadFailures(['Boot: ' + (e.message || 'failed')]); });
