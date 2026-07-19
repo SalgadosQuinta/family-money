@@ -1212,6 +1212,70 @@ async function cycleSpace(dom, A){
     assert(Number(DB.debts.find(x=>x.id==='d1').min_payment) === 300, 'apply sets the debt monthly payment');
   }
 
+
+  console.log('--- Payback planner: debt free by a date ---');
+  {
+    DB.settings=[]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[]; DB.assets=[];
+    DB.debts=[{id:'d1', name:'Barclaycard', debt_type:'credit_card', owner_name:'Rodney', principal:5000, balance:3000, currency:'GBP',
+               interest_rate:24, min_payment:150, archived:false},
+              {id:'d2', name:'Family loan', debt_type:'informal', owner_name:'Family', principal:1200, balance:1200, currency:'GBP',
+               interest_rate:0, min_payment:0, archived:false},
+              {id:'d3', name:'US loan', debt_type:'loan', owner_name:'Rodney', principal:2400, balance:2400, currency:'USD',
+               interest_rate:12, min_payment:100, archived:false}];
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){ w.fetch = mockFetch;
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}})); }});
+    await wait(200);
+    const d = dom.window.document, A = dom.window.App;
+
+    // maths
+    assert(A.requiredPayment(1200, 0, 12, 12) === 100, 'zero-rate: balance / periods');
+    const rp = A.requiredPayment(3000, 24, 12, 12);
+    assert(rp > 250 && rp < 300, 'annuity payment above flat split, below silly (24% APR, 12 months)');
+    // check the annuity actually clears in exactly n periods: feed it back through payoffPlan
+    const chk = A.payoffPlan(3000, 24, Math.ceil(rp * 100) / 100, 12);
+    assert(chk && chk.periods === 12, 'required payment clears in exactly the target periods');
+    assert(A.requiredPayment(1000, 10, 0, 12) === null, 'past date (0 periods) returns null');
+    assert(A.periodsUntil(A.todayISO(), 12) === 0, 'today or earlier yields zero periods');
+    const wN = A.periodsUntil('2027-02-01', 52), mN = A.periodsUntil('2027-02-01', 12);
+    assert(wN > mN * 4 && wN < mN * 4.7, 'weekly periods roughly 4.3x monthly to the same date');
+
+    // UI: mode toggle, multi-debt totals per currency
+    d.querySelector('#tabs button[data-view="debts"]').click();
+    A.setPaybackMode('date');
+    assert(d.getElementById('pp-date-controls').style.display === '' && d.getElementById('pp-amt-controls').style.display === 'none', 'date mode swaps controls');
+    assert(d.querySelectorAll('#ppd-debts input[data-ppd]').length === 3, 'all open debts listed with checkboxes');
+    d.getElementById('ppd-date').value = '2027-02-01';
+    d.getElementById('ppd-date').dispatchEvent(new dom.window.Event('change', {bubbles:true}));
+    let res = d.getElementById('pp-result').innerHTML;
+    assert(res.includes('GBP needed') && res.includes('USD needed'), 'totals shown per currency');
+    assert(res.includes('Payments left'), 'periods to the date shown');
+    assert(res.includes('Barclaycard') && res.includes('Family loan') && res.includes('US loan'), 'per-debt required payments listed');
+    assert(res.includes('Interest cost to the finish line'), 'interest to finish shown');
+
+    // untick one debt: totals change, line disappears
+    const cb3 = d.querySelector('input[data-ppd="d3"]');
+    cb3.checked = false;
+    cb3.dispatchEvent(new dom.window.Event('change', {bubbles:true}));
+    res = d.getElementById('pp-result').innerHTML;
+    assert(!res.includes('US loan') && !res.includes('USD needed'), 'unticked debt excluded from plan and totals');
+
+    // All debts toggle re-includes
+    const all = d.getElementById('ppd-all');
+    all.checked = true;
+    all.dispatchEvent(new dom.window.Event('change', {bubbles:true}));
+    assert(d.getElementById('pp-result').innerHTML.includes('US loan'), 'All debts re-ticks everything');
+
+    // past date guarded
+    d.getElementById('ppd-date').value = '2020-01-01';
+    d.getElementById('ppd-date').dispatchEvent(new dom.window.Event('change', {bubbles:true}));
+    assert(d.getElementById('pp-result').innerHTML.includes('not in the future'), 'past date rejected honestly');
+
+    // switching back restores amount mode
+    A.setPaybackMode('amt');
+    assert(d.getElementById('pp-amt-controls').style.display === '' && d.getElementById('pp-date-controls').style.display === 'none', 'mode switch restores what-can-I-pay');
+  }
+
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

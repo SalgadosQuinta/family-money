@@ -421,18 +421,38 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
     <div class="panel"><div id="debts-list"><div class="empty">Loading…</div></div></div>
     <div class="panel">
       <h2>Payback planner</h2>
-      <p class="small muted" style="margin-top:0">What-if: choose a debt, set what you could pay, and see when it clears and what the interest costs — against what you're paying now.</p>
-      <div class="inline2">
-        <div><label class="f" for="pp-debt">Debt</label>
-          <select id="pp-debt"></select></div>
-        <div><label class="f" for="pp-freq">Frequency</label>
-          <select id="pp-freq">
-            <option value="monthly">Monthly</option>
-            <option value="weekly">Weekly</option>
-          </select></div>
+      <div style="display:flex;gap:6px;margin-bottom:8px">
+        <button class="iconbtn" id="pp-mode-amt" style="color:var(--brass);border-color:var(--brass)">What can I pay</button>
+        <button class="iconbtn" id="pp-mode-date">Debt free by a date</button>
       </div>
-      <label class="f" for="pp-amount">Payment amount</label>
-      <input id="pp-amount" type="number" inputmode="decimal" step="0.01" min="0">
+      <p class="small muted" id="pp-blurb" style="margin-top:0">What-if: choose a debt, set what you could pay, and see when it clears and what the interest costs — against what you're paying now.</p>
+      <div id="pp-amt-controls">
+        <div class="inline2">
+          <div><label class="f" for="pp-debt">Debt</label>
+            <select id="pp-debt"></select></div>
+          <div><label class="f" for="pp-freq">Frequency</label>
+            <select id="pp-freq">
+              <option value="monthly">Monthly</option>
+              <option value="weekly">Weekly</option>
+            </select></div>
+        </div>
+        <label class="f" for="pp-amount">Payment amount</label>
+        <input id="pp-amount" type="number" inputmode="decimal" step="0.01" min="0">
+      </div>
+      <div id="pp-date-controls" style="display:none">
+        <div class="inline2">
+          <div><label class="f" for="ppd-date">Debt free by</label>
+            <input id="ppd-date" type="date"></div>
+          <div><label class="f" for="ppd-freq">Pay</label>
+            <select id="ppd-freq">
+              <option value="monthly">Monthly</option>
+              <option value="weekly">Weekly</option>
+            </select></div>
+        </div>
+        <label class="f">Which debts</label>
+        <div id="ppd-debts" style="border:1px solid var(--line);border-radius:8px;padding:8px;max-height:180px;overflow-y:auto"></div>
+        <label class="linkbtn" style="display:inline-block;margin-top:6px"><input type="checkbox" id="ppd-all" style="width:auto" checked> All debts</label>
+      </div>
       <div id="pp-result" style="margin-top:12px"></div>
       <div class="btnrow" id="pp-actions" style="display:none">
         <button class="btn" id="pp-apply">Set as this debt's monthly payment</button>
@@ -1078,6 +1098,24 @@ var App = (function(){
     else d.setMonth(d.getMonth() + n);
     var total = n * payment; // final period slightly overstates; close enough for planning
     return {periods:n, date:isoOf(d), interest:Math.max(0, total - balance), total:total};
+  }
+  // Periods between today and a target date. Floor so the plan finishes ON or BEFORE the date.
+  function periodsUntil(dateISO, periodsPerYear){
+    var t = new Date(todayISO() + 'T00:00:00'), d = new Date(dateISO + 'T00:00:00');
+    if(d <= t) return 0;
+    if(periodsPerYear === 52) return Math.max(1, Math.floor((d - t) / (7 * 86400000)));
+    var m = (d.getFullYear() - t.getFullYear()) * 12 + (d.getMonth() - t.getMonth());
+    if(d.getDate() < t.getDate()) m -= 1;
+    return Math.max(1, m);
+  }
+  // Payment per period required to clear a balance in n periods at the debt's APR (annuity formula).
+  function requiredPayment(balance, aprPct, n, periodsPerYear){
+    balance = Number(balance);
+    if(!(balance > 0)) return 0;
+    if(!(n > 0)) return null;
+    var r = (Number(aprPct) || 0) / 100 / (periodsPerYear || 12);
+    if(r === 0) return balance / n;
+    return balance * r / (1 - Math.pow(1 + r, -n));
   }
   // Months to clear + total interest at a fixed monthly payment. null = never clears at that payment.
   function payoffProjection(balance, aprPct, monthly){
@@ -2346,6 +2384,71 @@ var App = (function(){
     out.innerHTML = html;
     actions.style.display = freq === 'monthly' ? '' : 'none';
   }
+  function renderPaybackDate(){
+    var out = $('pp-result'); if(!out) return;
+    $('pp-actions').style.display = 'none';
+    var open = state.debts.filter(function(d){ return Number(d.balance) > 0; });
+    var list = $('ppd-debts');
+    if(!open.length){ list.innerHTML = ''; out.innerHTML = '<div class="empty">No open debts — already there.</div>'; return; }
+    // (re)build the checkbox list, preserving choices
+    var chosen = {};
+    list.querySelectorAll('input[data-ppd]').forEach(function(cb){ chosen[cb.getAttribute('data-ppd')] = cb.checked; });
+    if(!list.children.length || list.querySelectorAll('input[data-ppd]').length !== open.length){
+      list.innerHTML = open.map(function(d){
+        var ck = (d.id in chosen) ? chosen[d.id] : $('ppd-all').checked;
+        return '<label style="display:flex;gap:8px;align-items:center;font-size:13px;margin:4px 0">' +
+          '<input type="checkbox" style="width:auto" data-ppd="' + esc(d.id) + '"' + (ck ? ' checked' : '') + '>' +
+          esc(d.name) + ' — ' + esc(fmtMoney(d.balance, d.currency)) +
+          (Number(d.interest_rate) ? ' @ ' + esc(String(d.interest_rate)) + '%' : '') + '</label>';
+      }).join('');
+    }
+    var dateISO = $('ppd-date').value;
+    if(!dateISO){ out.innerHTML = '<div class="small muted">Pick the date you want to be debt free by.</div>'; return; }
+    var freq = $('ppd-freq').value, ppy = freq === 'weekly' ? 52 : 12;
+    var n = periodsUntil(dateISO, ppy);
+    if(n === 0){ out.innerHTML = '<div class="small" style="color:var(--red)">That date is not in the future.</div>'; return; }
+    var sel = open.filter(function(d){
+      var cb = list.querySelector('input[data-ppd="' + d.id + '"]');
+      return cb && cb.checked;
+    });
+    if(!sel.length){ out.innerHTML = '<div class="small muted">Tick at least one debt.</div>'; return; }
+    var unit = freq === 'weekly' ? 'week' : 'month';
+    var totals = {}, totalInterest = {}, lines = '';
+    sel.forEach(function(d){
+      var pay = requiredPayment(d.balance, d.interest_rate, n, ppy);
+      totals[d.currency] = (totals[d.currency] || 0) + pay;
+      var interest = pay * n - Number(d.balance);
+      totalInterest[d.currency] = (totalInterest[d.currency] || 0) + Math.max(0, interest);
+      lines += '<div class="item"><div><strong>' + esc(d.name) + '</strong>' +
+        '<div class="small muted">' + esc(fmtMoney(d.balance, d.currency)) +
+        (Number(d.interest_rate) ? ' @ ' + esc(String(d.interest_rate)) + '%' : ' interest-free') + '</div></div>' +
+        '<div class="amount">' + esc(fmtMoney(pay, d.currency)) + '/' + unit + '</div></div>';
+    });
+    out.innerHTML = '<div class="statgrid">' +
+      Object.keys(totals).map(function(c){
+        return '<div class="stat"><div class="eyebrow">' + esc(c) + ' needed</div>' +
+          '<div class="v" style="color:var(--brass)">' + esc(fmtMoney(totals[c], c)) + '/' + unit + '</div></div>';
+      }).join('') +
+      '<div class="stat"><div class="eyebrow">Payments left</div><div class="v">' + n + ' ' + unit + (n === 1 ? '' : 's') + '</div></div></div>' +
+      lines +
+      (Object.keys(totalInterest).some(function(c){ return totalInterest[c] > 0.5; })
+        ? '<div class="small muted" style="margin-top:8px">Interest cost to the finish line: ' +
+          esc(Object.keys(totalInterest).filter(function(c){ return totalInterest[c] > 0.5; })
+            .map(function(c){ return fmtMoney(totalInterest[c], c); }).join(' · ')) + '</div>' : '');
+  }
+  function setPaybackMode(mode){
+    state.ppMode = mode;
+    $('pp-amt-controls').style.display = mode === 'date' ? 'none' : '';
+    $('pp-date-controls').style.display = mode === 'date' ? '' : 'none';
+    $('pp-blurb').textContent = mode === 'date'
+      ? 'Pick the date you want to be debt free by and which debts count — it works out what each needs per period, interest included.'
+      : "What-if: choose a debt, set what you could pay, and see when it clears and what the interest costs — against what you're paying now.";
+    [['pp-mode-amt','amt'],['pp-mode-date','date']].forEach(function(pair){
+      var el = $(pair[0]), on = (mode === pair[1]);
+      el.style.color = on ? 'var(--brass)' : ''; el.style.borderColor = on ? 'var(--brass)' : '';
+    });
+    if(mode === 'date') renderPaybackDate(); else renderPayback();
+  }
   function renderDebtPayments(){
     var el = $('debt-payments-list');
     var rows = state.debtPayments.slice(0, 20);
@@ -2914,7 +3017,7 @@ var App = (function(){
   function renderAll(){
     renderNetWorth();
     renderBills(); renderPayments(); renderExpenses(); renderDashboard(); renderPlanner();
-    renderDebts(); renderDebtPayments(); renderNetPosition(); renderAnalysis(); renderAdmin(); renderAssets(); fillPaybackSelect();
+    renderDebts(); renderDebtPayments(); renderNetPosition(); renderAnalysis(); renderAdmin(); renderAssets(); fillPaybackSelect(); if(state.ppMode === 'date') renderPaybackDate();
     fillAccountSelects(); setupNotifCard();
   }
 
@@ -3276,6 +3379,17 @@ var App = (function(){
           .catch(function(e){ toast(e.message); });
       });
     });
+    $('pp-mode-amt').addEventListener('click', function(){ setPaybackMode('amt'); });
+    $('pp-mode-date').addEventListener('click', function(){ setPaybackMode('date'); });
+    $('ppd-date').addEventListener('change', renderPaybackDate);
+    $('ppd-freq').addEventListener('change', renderPaybackDate);
+    $('ppd-all').addEventListener('change', function(){
+      document.querySelectorAll('#ppd-debts input[data-ppd]').forEach(function(cb){ cb.checked = this.checked; }, this);
+      var all = this.checked;
+      document.querySelectorAll('#ppd-debts input[data-ppd]').forEach(function(cb){ cb.checked = all; });
+      renderPaybackDate();
+    });
+    $('ppd-debts').addEventListener('change', renderPaybackDate);
     $('pp-debt').addEventListener('change', function(){ $('pp-amount').value = ''; renderPayback(); });
     $('pp-freq').addEventListener('change', function(){ $('pp-amount').value = ''; renderPayback(); });
     $('pp-amount').addEventListener('input', renderPayback);
@@ -3432,7 +3546,8 @@ var App = (function(){
     state:state, init:init, boot:boot, todayISO:todayISO,
     fridayOf:fridayOf, weeksOfMonth:weeksOfMonth, weekTotals:weekTotals, shiftMonth:shiftMonth,
     moveCard:moveCard, mapCaptureResponse:mapCaptureResponse, renderPlanner:renderPlanner,
-    accountBalance:accountBalance, payoffProjection:payoffProjection, payoffPlan:payoffPlan, renderPayback:renderPayback, fillPaybackSelect:fillPaybackSelect, monthlyClose:monthlyClose,
+    accountBalance:accountBalance, payoffProjection:payoffProjection, payoffPlan:payoffPlan, renderPayback:renderPayback, fillPaybackSelect:fillPaybackSelect,
+    periodsUntil:periodsUntil, requiredPayment:requiredPayment, renderPaybackDate:renderPaybackDate, setPaybackMode:setPaybackMode, monthlyClose:monthlyClose,
     netWorth:netWorth, renderAssets:renderAssets, ASSET_CLASSES:ASSET_CLASSES, fillAssetClassSelect:fillAssetClassSelect, debtAssetInfo:debtAssetInfo, debtEquity:debtEquity, lineChart:lineChart, seriesFor:seriesFor, takeSnapshots:takeSnapshots, renderNetWorth:renderNetWorth,
     hashPin:hashPin, pinRequired:pinRequired, tryUnlock:tryUnlock, nextPlannerWeek:nextPlannerWeek,
     privateUnlocked:privateUnlocked, requirePrivatePin:requirePrivatePin, requireSpacePin:requireSpacePin, savePinSetting:savePinSetting, materialiseIncome:materialiseIncome,
