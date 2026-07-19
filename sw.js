@@ -1,5 +1,5 @@
 /* Family Money service worker — bump CACHE on every deploy */
-var CACHE = 'family-money-v27';
+var CACHE = 'family-money-v28';
 var ASSETS = ['./', './index.html', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/crest-96.png'];
 
 self.addEventListener('install', function (e) {
@@ -23,17 +23,29 @@ self.addEventListener('fetch', function (e) {
     // NETWORK-FIRST for the app shell: every load gets the latest deploy;
     // the cache is only an offline fallback. This removes the old
     // "second reload" requirement permanently.
-    e.respondWith(
-      fetch(e.request).then(function (res) {
+    // Network-first with a deadline: try the network for up to 3.5s so fresh
+    // deploys land immediately on a good connection, but fall back to the
+    // cached shell on a slow or stalled one instead of hanging blank.
+    e.respondWith((function(){
+      var netP = fetch(e.request).then(function (res) {
         if (res && res.ok) {
           var copy = res.clone();
           caches.open(CACHE).then(function (c) { c.put(e.request, copy); });
         }
         return res;
-      }).catch(function () {
-        return caches.match(e.request).then(function (hit) { return hit || caches.match('./index.html'); });
-      })
-    );
+      });
+      var timed = new Promise(function (resolve) {
+        setTimeout(function(){
+          caches.match(e.request).then(function (hit) {
+            resolve(hit || caches.match('./index.html'));
+          });
+        }, 3500);
+      });
+      return Promise.race([
+        netP.catch(function(){ return caches.match(e.request).then(function (hit) { return hit || caches.match('./index.html'); }); }),
+        timed
+      ]).then(function (res) { return res || netP; });
+    })());
     return;
   }
   e.respondWith(
