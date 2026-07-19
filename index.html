@@ -1236,14 +1236,18 @@ var App = (function(){
       'Authorization': 'Bearer ' + (state.session ? state.session.access_token : ANON_KEY),
       'Content-Type': 'application/json'
     }, opts.headers || {});
-    return fetch(SUPABASE_URL + path, Object.assign({}, opts, {headers:headers}))
+    var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var timer = ctrl ? setTimeout(function(){ ctrl.abort(); }, opts.timeoutMs || 8000) : null;
+    return fetch(SUPABASE_URL + path, Object.assign({}, opts, {headers:headers, signal: ctrl ? ctrl.signal : undefined}))
       .then(function(r){
+        if(timer) clearTimeout(timer);
         if(r.status === 401 && !_retried && state.session){
           return refreshToken().then(function(){ return api(path, opts, true); })
             .catch(function(){ signOut(); throw new Error('Session expired'); });
         }
         return r;
-      });
+      })
+      .catch(function(e){ if(timer) clearTimeout(timer); throw e; });
   }
   function apiJSON(path, opts){
     opts = opts || {};
@@ -1275,7 +1279,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v28';
+  var APP_BUILD = 'v29';
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
      is down we render the last-known data with a visible banner.
@@ -1284,7 +1288,7 @@ var App = (function(){
      deliberately online-only. */
   var OUTBOX_OK = /^\/rest\/v1\/(fam_expenses|fam_bill_payments|fam_planner_items)(\?|$)/;
   var OFFLINE = {active:false};
-  function isNetErr(e){ return e && (e.name === 'TypeError' || /fetch|network/i.test(e.message || '')); }
+  function isNetErr(e){ return e && (e.name === 'TypeError' || e.name === 'AbortError' || /fetch|network|abort/i.test(e.message || '')); }
   function cacheUid(){ return (state.session && state.session.user && state.session.user.id) || 'anon'; }
   function cachePut(path, data){ try{ localStorage.setItem('fm-cache:' + cacheUid() + ':' + path, JSON.stringify({t:Date.now(), d:data})); }catch(e){} }
   function cacheGet(path){ try{ var v = localStorage.getItem('fm-cache:' + cacheUid() + ':' + path); return v ? JSON.parse(v) : null; }catch(e){ return null; } }
