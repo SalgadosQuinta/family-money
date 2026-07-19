@@ -1404,10 +1404,10 @@ async function cycleSpace(dom, A){
     await w.eval && null;
     const bills = await w.eval ? null : null;
     // call through the app's own loader via a fresh GET path it cached at boot
-    const cached = w.localStorage.getItem('fm-cache:/rest/v1/fam_bills?select=*&order=due_date.asc');
+    const cached = w.localStorage.getItem('fm-cache:'+UID+':/rest/v1/fam_bills?select=*&order=due_date.asc');
     assert(cached || Object.keys(w.localStorage).length >= 0, 'GET responses were cached at boot');
     // simulate a reload of bills while offline: any cached key can be read back
-    let anyCacheKey=null; for(let i=0;i<w.localStorage.length;i++){const k=w.localStorage.key(i); if(k&&k.startsWith('fm-cache:')){anyCacheKey=k;break;}}
+    let anyCacheKey=null; for(let i=0;i<w.localStorage.length;i++){const k=w.localStorage.key(i); if(k&&k.startsWith('fm-cache:'+UID+':')){anyCacheKey=k;break;}}
     assert(anyCacheKey, 'at least one fm-cache entry exists');
 
     // 2) queueable POST goes to the outbox while offline, replays when back
@@ -1428,14 +1428,32 @@ async function cycleSpace(dom, A){
     w2.document.getElementById('ex-category').value='Groceries';
     w2.document.getElementById('ex-save-btn').click();
     await wait(150);
-    const q=JSON.parse(w2.localStorage.getItem('fm-outbox')||'[]');
+    const q=JSON.parse(w2.localStorage.getItem('fm-outbox:'+UID)||'[]');
     assert(q.length===1 && q[0].path.startsWith('/rest/v1/fam_expenses'), 'offline expense queued to outbox');
     assert(posted.length===0, 'nothing hit the network while offline');
     w2.__kill(false);
     w2.dispatchEvent(new w2.Event('online'));
     await wait(200);
-    assert(JSON.parse(w2.localStorage.getItem('fm-outbox')||'[]').length===0, 'outbox empty after replay');
+    assert(JSON.parse(w2.localStorage.getItem('fm-outbox:'+UID)||'[]').length===0, 'outbox empty after replay');
     assert(posted.length===1, 'queued expense replayed exactly once');
+  }
+
+  // ---- Membership check resilience ----
+  {
+    // fam_members fetch fails twice (initial + retry): app must NOT claim non-membership;
+    // it must show the connection explanation instead.
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){
+        w.fetch = function(url,opts){
+          if(String(url).includes('/rest/v1/fam_members')) return Promise.reject(new TypeError('Failed to fetch'));
+          return mockFetch(url,opts);
+        };
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}}));
+      }});
+    await wait(2300); // covers the 1.5s retry
+    const nm = dom.window.document.getElementById('notmember');
+    assert(nm && nm.textContent.includes('verify your membership'), 'failure shows verification message, not "not a family member"');
+    assert(!nm.textContent.includes('Ask the admin to add you'), 'does not falsely claim non-membership on network failure');
   }
 
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');

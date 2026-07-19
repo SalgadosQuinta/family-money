@@ -1282,10 +1282,11 @@ var App = (function(){
   var OUTBOX_OK = /^\/rest\/v1\/(fam_expenses|fam_bill_payments|fam_planner_items)(\?|$)/;
   var OFFLINE = {active:false};
   function isNetErr(e){ return e && (e.name === 'TypeError' || /fetch|network/i.test(e.message || '')); }
-  function cachePut(path, data){ try{ localStorage.setItem('fm-cache:' + path, JSON.stringify({t:Date.now(), d:data})); }catch(e){} }
-  function cacheGet(path){ try{ var v = localStorage.getItem('fm-cache:' + path); return v ? JSON.parse(v) : null; }catch(e){ return null; } }
-  function outbox(){ try{ return JSON.parse(localStorage.getItem('fm-outbox') || '[]'); }catch(e){ return []; } }
-  function outboxSave(q){ try{ localStorage.setItem('fm-outbox', JSON.stringify(q)); }catch(e){} offlineBadge(); }
+  function cacheUid(){ return (state.session && state.session.user && state.session.user.id) || 'anon'; }
+  function cachePut(path, data){ try{ localStorage.setItem('fm-cache:' + cacheUid() + ':' + path, JSON.stringify({t:Date.now(), d:data})); }catch(e){} }
+  function cacheGet(path){ try{ var v = localStorage.getItem('fm-cache:' + cacheUid() + ':' + path); return v ? JSON.parse(v) : null; }catch(e){ return null; } }
+  function outbox(){ try{ return JSON.parse(localStorage.getItem('fm-outbox:' + cacheUid()) || '[]'); }catch(e){ return []; } }
+  function outboxSave(q){ try{ localStorage.setItem('fm-outbox:' + cacheUid(), JSON.stringify(q)); }catch(e){} offlineBadge(); }
   function outboxAdd(path, opts){
     var q = outbox();
     q.push({path:path, body:opts.body, headers:opts.headers || null, ts:Date.now()});
@@ -1296,7 +1297,7 @@ var App = (function(){
       var table = path.split('?')[0];
       for(var i = 0; i < localStorage.length; i++){
         var k = localStorage.key(i);
-        if(k && k.indexOf('fm-cache:' + table) === 0){
+        if(k && k.indexOf('fm-cache:' + cacheUid() + ':' + table) === 0){
           var c = JSON.parse(localStorage.getItem(k));
           if(c && Object.prototype.toString.call(c.d) === '[object Array]'){ c.d.push(row); localStorage.setItem(k, JSON.stringify(c)); }
         }
@@ -1514,7 +1515,18 @@ var App = (function(){
           (ps || []).forEach(function(p){ state.profiles[p.id] = p; });
         });
       }
-    }).catch(function(){ state.isMember = false; });
+    }).catch(function(e){
+      // A failed request is not proof of non-membership. Retry once; if it
+      // still fails, keep any previously-known state and say what happened.
+      if(!loadMembers._retried){
+        loadMembers._retried = true;
+        return new Promise(function(res){ setTimeout(res, 1500); }).then(loadMembers).finally(function(){ loadMembers._retried = false; });
+      }
+      if(state.members && state.members.length){ return; } // keep known-good state from this session
+      state.memberCheckFailed = true;
+      var el = document.getElementById('notmember');
+      if(el) el.innerHTML = '<h2>Couldn\u2019t verify your membership</h2><p class="small muted">The membership check failed (' + esc(e.message || 'network error') + '). This is usually a connection problem \u2014 reload to try again. You have not been removed.</p>';
+    });
   }
   function loadBills(){
     return apiJSON('/rest/v1/fam_bills?select=*&archived=eq.false&order=due_date.asc' + spaceFilter())
