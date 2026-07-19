@@ -1279,7 +1279,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v29';
+  var APP_BUILD = 'v30';
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
      is down we render the last-known data with a visible banner.
@@ -1347,6 +1347,18 @@ var App = (function(){
       if(outbox().length) outboxReplay().then(function(){ if(!outbox().length){ toast('Offline changes synced.'); if(typeof switchSpaceReload === 'function' && state.session) switchSpaceReload(); } });
     }
     offlineBadge();
+  }
+  function showLoadFailures(failures){
+    var el = document.getElementById('loadfail-banner');
+    if(!failures || !failures.length){ if(el && el.parentNode) el.parentNode.removeChild(el); return; }
+    if(!el){
+      el = document.createElement('div');
+      el.id = 'loadfail-banner';
+      el.style.cssText = 'background:#3a1414;color:#e08585;font-size:12.5px;padding:7px 12px;text-align:center;border-bottom:1px solid #5a1e1e';
+      var hdr = document.querySelector('header');
+      if(hdr && hdr.parentNode) hdr.parentNode.insertBefore(el, hdr.nextSibling);
+    }
+    el.innerHTML = 'Some data failed to load \u2014 ' + esc(failures.join(' \u00b7 ')) + ' <button class="btn" style="margin-left:8px;font-size:12px;padding:2px 10px" onclick="location.reload()">Retry</button>';
   }
   function offlineBadge(){
     var el = document.getElementById('offline-banner');
@@ -3809,9 +3821,24 @@ var App = (function(){
         setSpace(currentSpace()); // repopulate space options now roles/grants are known
         if(!state.isMember){ setView('dashboard'); return; }
         setView(state.view);
-        return Promise.all([loadBills(), loadPayments(), loadExpenses(), loadPlanner(), loadAccounts(), loadDebts(), loadDebtPayments(), loadBudgets(), loadSnapshots(), loadSettings(), loadAssets()]).then(function(){ return takeSnapshots(); }).then(function(){ renderAll(); if(currentSpace() === 'family') runDueChecks(); });
+        // Fault-isolated loading: everything that succeeds renders; anything
+        // that fails is named in a persistent banner instead of silently
+        // blanking the whole app.
+        var failures = [];
+        var safe = function(fn, label){ return fn().catch(function(e){ failures.push(label + ': ' + (e.message || 'failed')); }); };
+        return Promise.all([
+          safe(loadBills,'Bills'), safe(loadPayments,'Payments'), safe(loadExpenses,'Expenses'),
+          safe(loadPlanner,'Planner'), safe(loadAccounts,'Accounts'), safe(loadDebts,'Debts'),
+          safe(loadDebtPayments,'Debt payments'), safe(loadBudgets,'Budgets'), safe(loadSnapshots,'Snapshots'),
+          safe(loadSettings,'Settings'), safe(loadAssets,'Assets')
+        ]).then(function(){ return takeSnapshots().catch(function(e){ failures.push('Snapshot: ' + (e.message||'failed')); }); })
+          .then(function(){
+            renderAll();
+            if(currentSpace() === 'family') runDueChecks();
+            showLoadFailures(failures);
+          });
       })
-      .catch(function(e){ toast(e.message); });
+      .catch(function(e){ toast(e.message); showLoadFailures(['Boot: ' + (e.message || 'failed')]); });
   }
 
   function init(){
