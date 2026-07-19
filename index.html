@@ -227,6 +227,8 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
   <div id="notmember" class="panel" style="display:none">
     <h2>Not yet a family member</h2>
     <p class="small muted">Your account is signed in but has not been added to the family space yet. Ask the admin to add you.</p>
+    <p class="small muted" id="notmember-diag"></p>
+    <div class="btnrow"><button class="btn" id="notmember-retry">Check again</button></div>
   </div>
 
   <!-- DASHBOARD -->
@@ -1273,6 +1275,7 @@ var App = (function(){
     });
   }
 
+  var APP_BUILD = 'v25';
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
      is down we render the last-known data with a visible banner.
@@ -1667,6 +1670,12 @@ var App = (function(){
     $('signin-view').style.display = 'none';
     $('app-view').style.display = '';
     $('notmember').style.display = state.isMember ? 'none' : '';
+    if(!state.isMember){
+      var dg = document.getElementById('notmember-diag');
+      if(dg) dg.textContent = 'Signed in as ' + ((state.session && state.session.user && state.session.user.email) || 'unknown') + ' \u00b7 app build ' + APP_BUILD + ' \u00b7 if this build is older than the latest fix, close all tabs and reload twice.';
+      var rb = document.getElementById('notmember-retry');
+      if(rb && !rb._wired){ rb._wired = true; rb.onclick = function(){ rb.disabled = true; rb.textContent = 'Checking\u2026'; loadMembers().then(function(){ rb.disabled = false; rb.textContent = 'Check again'; showApp(); if(state.isMember) boot(); }); }; }
+    }
   }
 
   function setView(v){
