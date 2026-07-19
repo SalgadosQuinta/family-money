@@ -1275,7 +1275,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v25';
+  var APP_BUILD = 'v26';
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
      is down we render the last-known data with a visible banner.
@@ -3792,7 +3792,19 @@ var App = (function(){
     bindEvents();
     if(loadSession()){ boot(); } else { showSignIn(); }
     if('serviceWorker' in navigator){
-      navigator.serviceWorker.register('sw.js').catch(function(){});
+      // updateViaCache:'none' stops the browser HTTP-caching sw.js itself;
+      // reg.update() forces a check on every load; when a new worker takes
+      // control we reload once so the user is never left on a stale build.
+      navigator.serviceWorker.register('sw.js', {updateViaCache:'none'})
+        .then(function(reg){ if(reg && reg.update) reg.update(); })
+        .catch(function(){});
+      var reloaded = false;
+      navigator.serviceWorker.addEventListener('controllerchange', function(){
+        if(reloaded) return; reloaded = true;
+        if(sessionStorage.getItem('fm-sw-reloaded') === '1'){ return; } // never loop
+        sessionStorage.setItem('fm-sw-reloaded','1');
+        location.reload();
+      });
     }
   }
 

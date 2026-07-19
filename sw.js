@@ -1,5 +1,5 @@
 /* Family Money service worker — bump CACHE on every deploy */
-var CACHE = 'family-money-v25';
+var CACHE = 'family-money-v26';
 var ASSETS = ['./', './index.html', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/crest-96.png'];
 
 self.addEventListener('install', function (e) {
@@ -18,6 +18,24 @@ self.addEventListener('fetch', function (e) {
   if (e.request.method !== 'GET') return;
   var url = new URL(e.request.url);
   if (url.origin !== location.origin) return; // never cache API calls
+  var isShell = e.request.mode === 'navigate' || url.pathname.endsWith('/index.html') || url.pathname.endsWith('/');
+  if (isShell) {
+    // NETWORK-FIRST for the app shell: every load gets the latest deploy;
+    // the cache is only an offline fallback. This removes the old
+    // "second reload" requirement permanently.
+    e.respondWith(
+      fetch(e.request).then(function (res) {
+        if (res && res.ok) {
+          var copy = res.clone();
+          caches.open(CACHE).then(function (c) { c.put(e.request, copy); });
+        }
+        return res;
+      }).catch(function () {
+        return caches.match(e.request).then(function (hit) { return hit || caches.match('./index.html'); });
+      })
+    );
+    return;
+  }
   e.respondWith(
     caches.match(e.request).then(function (hit) {
       var net = fetch(e.request).then(function (res) {
