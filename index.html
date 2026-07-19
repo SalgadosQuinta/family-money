@@ -1275,7 +1275,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v26';
+  var APP_BUILD = 'v27';
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
      is down we render the last-known data with a visible banner.
@@ -1672,7 +1672,33 @@ var App = (function(){
     $('notmember').style.display = state.isMember ? 'none' : '';
     if(!state.isMember){
       var dg = document.getElementById('notmember-diag');
-      if(dg) dg.textContent = 'Signed in as ' + ((state.session && state.session.user && state.session.user.email) || 'unknown') + ' \u00b7 app build ' + APP_BUILD + ' \u00b7 if this build is older than the latest fix, close all tabs and reload twice.';
+      if(dg){
+        var u = state.session && state.session.user || {};
+        dg.textContent = 'Signed in as ' + (u.email || 'unknown') + ' \u00b7 session uid ' + (u.id ? u.id.slice(0,8) : 'none') + ' \u00b7 app build ' + APP_BUILD + ' \u00b7 running a live check\u2026';
+        // Raw check: bypasses apiJSON, offline cache, everything.
+        fetch(SUPABASE_URL + '/rest/v1/fam_members?select=user_id,role', {headers:{
+          'apikey': ANON_KEY,
+          'Authorization': 'Bearer ' + (state.session ? state.session.access_token : ANON_KEY)
+        }}).then(function(r){
+          return r.text().then(function(t){
+            var uids = '';
+            try{ uids = (JSON.parse(t)||[]).map(function(m){ return m.user_id.slice(0,8) + ':' + m.role; }).join(', '); }catch(e){ uids = t.slice(0,120); }
+            dg.textContent = 'Signed in as ' + (u.email||'unknown') + ' \u00b7 session uid ' + (u.id?u.id.slice(0,8):'none') + ' \u00b7 build ' + APP_BUILD +
+              ' \u00b7 live check: HTTP ' + r.status + ' \u00b7 members [' + uids + ']' +
+              (r.status===200 ? '' : ' \u00b7 this status code is the fault \u2014 send me a screenshot');
+            // If the raw check finds the member the app missed, self-heal.
+            try{
+              var rows = JSON.parse(t) || [];
+              if(u.id && rows.some(function(m){ return m.user_id === u.id; }) && !state.isMember){
+                dg.textContent += ' \u00b7 membership found \u2014 recovering\u2026';
+                loadMembers().then(function(){ showApp(); if(state.isMember) boot(); });
+              }
+            }catch(e){}
+          });
+        }).catch(function(e){
+          dg.textContent = 'Signed in as ' + (u.email||'unknown') + ' \u00b7 build ' + APP_BUILD + ' \u00b7 live check FAILED: ' + (e.message||'network error') + ' \u2014 the browser cannot reach the database at all. Check connection, VPN, firewall or DNS for ' + SUPABASE_URL.replace('https://','') + '.';
+        });
+      }
       var rb = document.getElementById('notmember-retry');
       if(rb && !rb._wired){ rb._wired = true; rb.onclick = function(){ rb.disabled = true; rb.textContent = 'Checking\u2026'; loadMembers().then(function(){ rb.disabled = false; rb.textContent = 'Check again'; showApp(); if(state.isMember) boot(); }); }; }
     }
@@ -3770,7 +3796,10 @@ var App = (function(){
     $('ex-date').value = todayISO();
     fillCurrencySelects();
     if(outbox().length && navigator.onLine) outboxReplay().then(function(){ if(!outbox().length) toast('Offline changes synced.'); });
-    return Promise.all([loadMembers(), loadRates(), loadGrants(), loadNotifyPrefs()])
+    // Membership decides the gate on its own; other loaders may fail without
+    // holding the banner up.
+    return loadMembers()
+      .then(function(){ showApp(); return Promise.all([loadRates(), loadGrants(), loadNotifyPrefs()]).catch(function(e){ toast('Some data failed to load: ' + e.message); }); })
       .then(function(){
         showApp(); // re-check membership banner
         setSpace(currentSpace()); // repopulate space options now roles/grants are known
