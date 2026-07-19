@@ -1244,11 +1244,112 @@ var App = (function(){
       });
   }
   function apiJSON(path, opts){
+    opts = opts || {};
+    var method = (opts.method || 'GET').toUpperCase();
     return api(path, opts).then(function(r){
       if(!r.ok) return r.text().then(function(t){ throw new Error('API ' + r.status + ': ' + t.slice(0,200)); });
-      if(r.status === 204) return null;
-      return r.text().then(function(t){ return t ? JSON.parse(t) : null; });
+      offlineSet(false);
+      if(r.status === 204){ return null; }
+      return r.text().then(function(t){
+        var d = t ? JSON.parse(t) : null;
+        if(method === 'GET') cachePut(path, d);
+        return d;
+      });
+    }).catch(function(e){
+      if(isNetErr(e)){
+        if(method === 'GET'){
+          var c = cacheGet(path);
+          if(c){ offlineSet(true, c.t); return c.d; }
+        }
+        if(method === 'POST' && OUTBOX_OK.test(path)){
+          outboxAdd(path, opts);
+          offlineSet(true);
+          toast('Saved offline — will sync when you\u2019re back online.');
+          return null;
+        }
+        offlineSet(true);
+      }
+      throw e;
     });
+  }
+
+  /* ---------------- offline layer ----------------
+     Reads: every successful GET is cached in localStorage; when the network
+     is down we render the last-known data with a visible banner.
+     Writes: additive POSTs to the whitelist below queue in an outbox and
+     replay in order when connectivity returns. Edits and admin actions are
+     deliberately online-only. */
+  var OUTBOX_OK = /^\/rest\/v1\/(fam_expenses|fam_bill_payments|fam_planner_items)(\?|$)/;
+  var OFFLINE = {active:false};
+  function isNetErr(e){ return e && (e.name === 'TypeError' || /fetch|network/i.test(e.message || '')); }
+  function cachePut(path, data){ try{ localStorage.setItem('fm-cache:' + path, JSON.stringify({t:Date.now(), d:data})); }catch(e){} }
+  function cacheGet(path){ try{ var v = localStorage.getItem('fm-cache:' + path); return v ? JSON.parse(v) : null; }catch(e){ return null; } }
+  function outbox(){ try{ return JSON.parse(localStorage.getItem('fm-outbox') || '[]'); }catch(e){ return []; } }
+  function outboxSave(q){ try{ localStorage.setItem('fm-outbox', JSON.stringify(q)); }catch(e){} offlineBadge(); }
+  function outboxAdd(path, opts){
+    var q = outbox();
+    q.push({path:path, body:opts.body, headers:opts.headers || null, ts:Date.now()});
+    outboxSave(q);
+    // optimistically merge into cached reads for this table so the UI shows it
+    try{
+      var row = JSON.parse(opts.body); row.id = row.id || ('off-' + Date.now()); row._pending = true;
+      var table = path.split('?')[0];
+      for(var i = 0; i < localStorage.length; i++){
+        var k = localStorage.key(i);
+        if(k && k.indexOf('fm-cache:' + table) === 0){
+          var c = JSON.parse(localStorage.getItem(k));
+          if(c && Object.prototype.toString.call(c.d) === '[object Array]'){ c.d.push(row); localStorage.setItem(k, JSON.stringify(c)); }
+        }
+      }
+    }catch(e){}
+  }
+  function outboxReplay(){
+    var q = outbox();
+    if(!q.length || !state.session) return Promise.resolve();
+    var item = q[0];
+    return api(item.path, {method:'POST', headers:Object.assign({'Prefer':'return=minimal'}, item.headers || {}), body:item.body})
+      .then(function(r){
+        if(r.ok || r.status === 409){ // 409 = duplicate from an earlier partial replay — safe to drop
+          q.shift(); outboxSave(q);
+          return outboxReplay();
+        }
+        return r.text().then(function(t){
+          q.shift(); outboxSave(q);
+          toast('One offline entry couldn\u2019t sync (' + r.status + ') — please re-add it. ' + t.slice(0,80));
+          return outboxReplay();
+        });
+      })
+      .catch(function(e){ if(!isNetErr(e)) { q.shift(); outboxSave(q); } /* network still down: keep queue */ });
+  }
+  function offlineSet(on, cachedAt){
+    if(OFFLINE.active === on && !cachedAt) { offlineBadge(); return; }
+    OFFLINE.active = on;
+    var el = document.getElementById('offline-banner');
+    if(on){
+      if(!el){
+        el = document.createElement('div');
+        el.id = 'offline-banner';
+        el.style.cssText = 'background:#3a2f14;color:#c9a227;font-size:12.5px;padding:6px 12px;text-align:center;border-bottom:1px solid #5a4a1e';
+        var hdr = document.querySelector('header');
+        if(hdr && hdr.parentNode) hdr.parentNode.insertBefore(el, hdr.nextSibling);
+      }
+      el.textContent = 'Offline — showing saved data' + (cachedAt ? ' from ' + new Date(cachedAt).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'}) : '') + (outbox().length ? ' · ' + outbox().length + ' change(s) waiting to sync' : '');
+    } else {
+      if(el && el.parentNode) el.parentNode.removeChild(el);
+      if(outbox().length) outboxReplay().then(function(){ if(!outbox().length){ toast('Offline changes synced.'); if(typeof switchSpaceReload === 'function' && state.session) switchSpaceReload(); } });
+    }
+    offlineBadge();
+  }
+  function offlineBadge(){
+    var el = document.getElementById('offline-banner');
+    if(el && OFFLINE.active){
+      var n = outbox().length;
+      el.textContent = 'Offline — showing saved data' + (n ? ' · ' + n + ' change(s) waiting to sync' : '');
+    }
+  }
+  if(typeof window !== 'undefined'){
+    window.addEventListener('online', function(){ offlineSet(false); });
+    window.addEventListener('offline', function(){ offlineSet(true); });
   }
 
   function signIn(email, password){
@@ -3647,6 +3748,7 @@ var App = (function(){
     setPlannerMode(state.plMode);
     $('ex-date').value = todayISO();
     fillCurrencySelects();
+    if(outbox().length && navigator.onLine) outboxReplay().then(function(){ if(!outbox().length) toast('Offline changes synced.'); });
     return Promise.all([loadMembers(), loadRates(), loadGrants(), loadNotifyPrefs()])
       .then(function(){
         showApp(); // re-check membership banner
