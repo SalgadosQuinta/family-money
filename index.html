@@ -522,6 +522,11 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
       <div id="ad-farm-grants"></div>
     </div>
     <div class="panel fam-only">
+      <h2>WhatsApp notifications</h2>
+      <p class="small muted" style="margin-top:0">Set up per person — they don't need to do anything technical beyond a one-off opt-in from their phone: save <strong>+34&nbsp;644&nbsp;44&nbsp;21&nbsp;48</strong> as a contact, WhatsApp it "I allow callmebot to send me messages", and it replies with their personal API key. Enter it below with their number, switch them on, and tick exactly which events notify them.</p>
+      <div id="ad-notify"></div>
+    </div>
+    <div class="panel fam-only">
       <h2>Manual exchange rates</h2>
       <p class="small muted" style="margin-top:0">ZWG has no public daily feed, so set the rate here for the indicative ≈USD figures. Update it whenever the street rate moves.</p>
       <div class="inline2">
@@ -972,7 +977,8 @@ var App = (function(){
     editingAsset: null,
     sortAssets: 'value',
     farmGranted: false,
-    farmGrants: []
+    farmGrants: [],
+    notifyPrefs: []
   };
 
   /* ---------------- utilities ---------------- */
@@ -1371,6 +1377,11 @@ var App = (function(){
     });
   }
 
+  function loadNotifyPrefs(){
+    return apiJSON('/rest/v1/fam_notify_prefs?select=*')
+      .then(function(rows){ state.notifyPrefs = rows || []; })
+      .catch(function(){ state.notifyPrefs = []; });
+  }
   function loadGrants(){
     return apiJSON('/rest/v1/fam_space_grants?select=space,user_id')
       .then(function(rows){
@@ -2680,6 +2691,24 @@ var App = (function(){
     document.querySelectorAll('.fam-only').forEach(function(el){ el.style.display = sp === 'family' ? '' : 'none'; });
     if(sp === 'family' && !state.isAdmin) return;
     if(sp === 'family'){
+      var nEl = $('ad-notify');
+      if(nEl) nEl.innerHTML = state.members.map(function(m){
+        var p = state.notifyPrefs.find(function(x){ return x.user_id === m.user_id; }) || {};
+        var ev = p.events || {task_assigned:true, task_updated:false};
+        var uid = esc(m.user_id);
+        return '<div class="item" style="flex-wrap:wrap;gap:8px" data-nprow="' + uid + '">' +
+          '<div style="min-width:120px"><strong>' + esc(memberName(m.user_id)) + '</strong>' +
+          '<div class="small ' + (p.wa_enabled ? '' : 'muted') + '" style="color:' + (p.wa_enabled ? 'var(--green)' : '') + '">' + (p.wa_enabled ? 'WhatsApp on' : 'off') + '</div></div>' +
+          '<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;flex:1;min-width:260px">' +
+            '<input data-np="wa_phone" placeholder="+447700900123" value="' + esc(p.wa_phone || '') + '" style="width:150px;padding:6px 8px;font-size:13px">' +
+            '<input data-np="wa_key" placeholder="API key" value="' + esc(p.wa_key || '') + '" style="width:90px;padding:6px 8px;font-size:13px">' +
+            '<label class="small" style="display:flex;gap:4px;align-items:center"><input type="checkbox" style="width:auto" data-np="wa_enabled"' + (p.wa_enabled ? ' checked' : '') + '> On</label>' +
+            '<label class="small" style="display:flex;gap:4px;align-items:center" title="When a task is set for them"><input type="checkbox" style="width:auto" data-np="ev_task_assigned"' + (ev.task_assigned !== false ? ' checked' : '') + '> Task set</label>' +
+            '<label class="small" style="display:flex;gap:4px;align-items:center" title="When one of their tasks is edited"><input type="checkbox" style="width:auto" data-np="ev_task_updated"' + (ev.task_updated === true ? ' checked' : '') + '> Task updated</label>' +
+            '<button class="linkbtn" data-npsave="' + uid + '">Save</button>' +
+            '<button class="linkbtn" data-nptest="' + uid + '">Test</button>' +
+          '</div></div>';
+      }).join('');
       var fg = $('ad-farm-grants');
       if(fg) fg.innerHTML = state.members.map(function(m){
         var granted = state.farmGrants.some(function(g){ return g.user_id === m.user_id; });
@@ -3436,6 +3465,33 @@ var App = (function(){
       p.then(function(){ toast(t.checked ? 'Farm access granted.' : 'Farm access removed.'); return loadGrants().then(renderAdmin); })
        .catch(function(err){ toast(err.message); t.checked = !t.checked; });
     });
+    $('ad-notify').addEventListener('click', function(e){
+      var saveBtn = e.target.closest('[data-npsave]'), testBtn = e.target.closest('[data-nptest]');
+      if(!saveBtn && !testBtn) return;
+      var uid = (saveBtn || testBtn).getAttribute(saveBtn ? 'data-npsave' : 'data-nptest');
+      var row = document.querySelector('[data-nprow="' + uid + '"]');
+      var val = function(k){ var el = row.querySelector('[data-np="' + k + '"]'); return el.type === 'checkbox' ? el.checked : el.value.trim(); };
+      var body = {user_id:uid, wa_phone:(val('wa_phone') || null), wa_key:(val('wa_key') || null),
+        wa_enabled:val('wa_enabled'),
+        events:{task_assigned:val('ev_task_assigned'), task_updated:val('ev_task_updated')},
+        updated_at:new Date().toISOString()};
+      if(testBtn){
+        if(!body.wa_phone || !body.wa_key){ toast('Enter their number and API key first.'); return; }
+        testBtn.disabled = true;
+        fetch(SUPABASE_URL + '/functions/v1/notify-whatsapp', {method:'POST',
+          headers:{'Authorization':'Bearer ' + state.session.access_token, 'apikey':ANON_KEY, 'Content-Type':'application/json'},
+          body:JSON.stringify({phone:body.wa_phone, apikey:body.wa_key, text:'Test from Julius Family Money — WhatsApp alerts are working.'})})
+          .then(function(r){ toast(r.ok ? 'Test sent — check their WhatsApp.' : 'Test failed — check number, key, and that notify-whatsapp is deployed.'); })
+          .catch(function(){ toast('Test failed — is the notify-whatsapp function deployed?'); })
+          .then(function(){ testBtn.disabled = false; });
+        return;
+      }
+      apiJSON('/rest/v1/fam_notify_prefs?on_conflict=user_id', {method:'POST',
+        headers:{'Prefer':'return=minimal,resolution=merge-duplicates'},
+        body:JSON.stringify(body)})
+        .then(function(){ toast('Notification settings saved.'); return loadNotifyPrefs().then(renderAdmin); })
+        .catch(function(e2){ toast(e2.message); });
+    });
     $('rate-save').addEventListener('click', function(){
       var v = parseFloat($('rate-zwg').value);
       if(!(v > 0)){ toast('Enter a valid rate.'); return; }
@@ -3512,7 +3568,7 @@ var App = (function(){
     setPlannerMode(state.plMode);
     $('ex-date').value = todayISO();
     fillCurrencySelects();
-    return Promise.all([loadMembers(), loadRates(), loadGrants()])
+    return Promise.all([loadMembers(), loadRates(), loadGrants(), loadNotifyPrefs()])
       .then(function(){
         showApp(); // re-check membership banner
         setSpace(currentSpace()); // repopulate space options now roles/grants are known
@@ -3555,7 +3611,7 @@ var App = (function(){
     parseCSV:parseCSV, detectRecurring:detectRecurring, nextDueFromDay:nextDueFromDay,
     calendarFlows:calendarFlows, renderCalendar:renderCalendar, setPlannerMode:setPlannerMode, spaceLabel:spaceLabel,
     nextOnDate:nextOnDate, renderDay:renderDay,
-    loadGrants:loadGrants,
+    loadGrants:loadGrants, loadNotifyPrefs:loadNotifyPrefs,
     sortRows:sortRows, toCSV:toCSV, exportCSV:exportCSV, runDueChecks:runDueChecks, renderDebts:renderDebts,
     renderAdmin:renderAdmin, renderAnalysis:renderAnalysis, accountName:accountName,
     VAPID_PUBLIC:VAPID_PUBLIC

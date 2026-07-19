@@ -101,6 +101,13 @@ function mockFetch(url, opts){
     if(method==='PATCH'){ const id=/id=eq\.([^&]+)/.exec(url)[1]; Object.assign((DB.assets||[]).find(x=>x.id===id), JSON.parse(opts.body)); return j(null,204); }
     if(method==='DELETE'){ const id=/id=eq\.([^&]+)/.exec(url)[1]; DB.assets=(DB.assets||[]).filter(x=>x.id!==id); return j(null,204); }
   }
+  if(url.includes('/rest/v1/fam_notify_prefs')){
+    if(method==='GET') return j(DB.nprefs||[]);
+    if(method==='POST'){ DB.nprefs=DB.nprefs||[]; const b=JSON.parse(opts.body);
+      const ex=DB.nprefs.find(x=>x.user_id===b.user_id);
+      if(ex) Object.assign(ex,b); else DB.nprefs.push(b);
+      return j(null,201); }
+  }
   if(url.includes('/rest/v1/fam_space_grants')){
     if(method==='GET') return j(DB.grants||[]);
     if(method==='POST'){ DB.grants=(DB.grants||[]); DB.grants.push(JSON.parse(opts.body)); return j(null,201); }
@@ -1274,6 +1281,42 @@ async function cycleSpace(dom, A){
     // switching back restores amount mode
     A.setPaybackMode('amt');
     assert(d.getElementById('pp-amt-controls').style.display === '' && d.getElementById('pp-date-controls').style.display === 'none', 'mode switch restores what-can-I-pay');
+  }
+
+
+  console.log('--- Admin WhatsApp notification prefs ---');
+  {
+    DB.settings=[]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[]; DB.assets=[]; DB.nprefs=[];
+    const waCalls=[];
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){
+        w.fetch = function(url, opts){
+          if(url.includes('/functions/v1/notify-whatsapp')){ waCalls.push(JSON.parse(opts.body)); return Promise.resolve({ok:true,status:200,text:()=>Promise.resolve('{"ok":true}')}); }
+          return mockFetch(url, opts);
+        };
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}}));
+      }});
+    await wait(200);
+    const d = dom.window.document, A = dom.window.App;
+    d.querySelector('#tabs button[data-view="admin"]').click();
+    const rows = d.querySelectorAll('[data-nprow]');
+    assert(rows.length >= 2, 'a settings row per family member');
+    const row = d.querySelector('[data-nprow="' + UID2 + '"]');
+    assert(row !== null, 'row present for the second member');
+    row.querySelector('[data-np="wa_phone"]').value = '+447700900123';
+    row.querySelector('[data-np="wa_key"]').value = '9911';
+    row.querySelector('[data-np="wa_enabled"]').checked = true;
+    row.querySelector('[data-np="ev_task_updated"]').checked = true;
+
+    // test button fires the edge function with the entered details
+    row.querySelector('[data-nptest="' + UID2 + '"]').click(); await wait(80);
+    assert(waCalls.length === 1 && waCalls[0].phone === '+447700900123' && waCalls[0].apikey === '9911', 'Test sends via notify-whatsapp with the row details');
+
+    // save upserts the prefs with granular events
+    row.querySelector('[data-npsave="' + UID2 + '"]').click(); await wait(120);
+    const saved = DB.nprefs.find(x=>x.user_id===UID2);
+    assert(saved && saved.wa_enabled===true && saved.wa_phone==='+447700900123', 'prefs upserted for the member');
+    assert(saved.events.task_assigned===true && saved.events.task_updated===true, 'granular event toggles saved');
   }
 
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');
