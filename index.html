@@ -523,9 +523,13 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
     </div>
     <div class="panel fam-only">
       <h2>Backups</h2>
-      <p class="small muted" style="margin-top:0">Downloads every table across all spaces you can see into one dated JSON file. Policy: every Sunday, and always before running a migration. Keep it in the julius-money-backups cloud folder. Restore procedure: BACKUP-AND-RESILIENCE.md in the repo.</p>
-      <button class="btn primary" id="backup-btn">Download full backup (JSON)</button>
-      <span class="small muted" id="backup-status" style="margin-left:8px"></span>
+      <p class="small muted" style="margin-top:0">A full backup runs automatically every night at 02:00 UTC and lands below (60-day retention), with an off-platform copy to SharePoint when configured. Manual export remains for the before-migration snapshot. Restore procedure: BACKUP-AND-RESILIENCE.md in the repo.</p>
+      <div class="wsec">Automatic nightly backups</div>
+      <div id="backup-list"><div class="empty">Loading…</div></div>
+      <div style="margin-top:10px">
+        <button class="btn primary" id="backup-btn">Download manual backup now (JSON)</button>
+        <span class="small muted" id="backup-status" style="margin-left:8px"></span>
+      </div>
     </div>
     <div class="panel fam-only">
       <h2>WhatsApp notifications</h2>
@@ -1982,6 +1986,34 @@ var App = (function(){
   var BACKUP_TABLES = ['fam_members','fam_accounts','fam_assets','fam_bills','fam_bill_payments',
     'fam_expenses','fam_income','fam_planner_items','fam_debts','fam_debt_payments',
     'fam_budgets','fam_settings','fam_space_grants','fam_notify_prefs','fam_snapshots'];
+  function renderBackupList(){
+    var el = $('backup-list'); if(!el) return Promise.resolve();
+    return apiJSON('/storage/v1/object/list/backups', {method:'POST',
+      body: JSON.stringify({prefix:'', limit:100, sortBy:{column:'name', order:'desc'}})})
+      .then(function(files){
+        files = (files || []).filter(function(f){ return /^backup-.*\.json$/.test(f.name); }).slice(0, 10);
+        el.innerHTML = files.length ? files.map(function(f){
+          var kb = f.metadata && f.metadata.size ? Math.round(f.metadata.size / 1024) + ' KB' : '';
+          return '<div class="item"><div><strong>' + esc(f.name) + '</strong>' +
+            '<div class="small muted">' + kb + '</div></div>' +
+            '<button class="linkbtn" data-bkdl="' + esc(f.name) + '">Download</button></div>';
+        }).join('') : '<div class="empty">None yet — appears after the first 02:00 UTC run (needs migration 015 + the fam-backup function deployed).</div>';
+      })
+      .catch(function(){
+        el.innerHTML = '<div class="empty">Automatic backups not set up yet — run migration 015 and deploy the fam-backup function.</div>';
+      });
+  }
+  function downloadAutoBackup(name){
+    return apiJSON('/storage/v1/object/sign/backups/' + encodeURIComponent(name), {method:'POST',
+      body: JSON.stringify({expiresIn: 300})})
+      .then(function(r){
+        var a = document.createElement('a');
+        a.href = SUPABASE_URL + '/storage/v1' + r.signedURL;
+        a.download = name;
+        document.body.appendChild(a); a.click(); a.remove();
+      })
+      .catch(function(e){ toast(e.message); });
+  }
   function exportBackup(){
     var st = $('backup-status');
     st.textContent = 'Exporting…';
@@ -2732,6 +2764,7 @@ var App = (function(){
     document.querySelectorAll('.fam-only').forEach(function(el){ el.style.display = sp === 'family' ? '' : 'none'; });
     if(sp === 'family' && !state.isAdmin) return;
     if(sp === 'family'){
+      renderBackupList();
       var nEl = $('ad-notify');
       if(nEl) nEl.innerHTML = state.members.map(function(m){
         var p = state.notifyPrefs.find(function(x){ return x.user_id === m.user_id; }) || {};
@@ -3507,6 +3540,10 @@ var App = (function(){
        .catch(function(err){ toast(err.message); t.checked = !t.checked; });
     });
     $('backup-btn').addEventListener('click', function(){ exportBackup().catch(function(e){ $('backup-status').textContent = e.message; }); });
+    $('backup-list').addEventListener('click', function(e){
+      var b = e.target.closest('[data-bkdl]'); if(!b) return;
+      downloadAutoBackup(b.getAttribute('data-bkdl'));
+    });
     $('ad-notify').addEventListener('click', function(e){
       var saveBtn = e.target.closest('[data-npsave]'), testBtn = e.target.closest('[data-nptest]');
       if(!saveBtn && !testBtn) return;
@@ -3653,7 +3690,7 @@ var App = (function(){
     parseCSV:parseCSV, detectRecurring:detectRecurring, nextDueFromDay:nextDueFromDay,
     calendarFlows:calendarFlows, renderCalendar:renderCalendar, setPlannerMode:setPlannerMode, spaceLabel:spaceLabel,
     nextOnDate:nextOnDate, renderDay:renderDay,
-    loadGrants:loadGrants, loadNotifyPrefs:loadNotifyPrefs, exportBackup:exportBackup, BACKUP_TABLES:BACKUP_TABLES,
+    loadGrants:loadGrants, loadNotifyPrefs:loadNotifyPrefs, exportBackup:exportBackup, BACKUP_TABLES:BACKUP_TABLES, renderBackupList:renderBackupList,
     sortRows:sortRows, toCSV:toCSV, exportCSV:exportCSV, runDueChecks:runDueChecks, renderDebts:renderDebts,
     renderAdmin:renderAdmin, renderAnalysis:renderAnalysis, accountName:accountName,
     VAPID_PUBLIC:VAPID_PUBLIC

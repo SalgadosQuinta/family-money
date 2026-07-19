@@ -101,6 +101,13 @@ function mockFetch(url, opts){
     if(method==='PATCH'){ const id=/id=eq\.([^&]+)/.exec(url)[1]; Object.assign((DB.assets||[]).find(x=>x.id===id), JSON.parse(opts.body)); return j(null,204); }
     if(method==='DELETE'){ const id=/id=eq\.([^&]+)/.exec(url)[1]; DB.assets=(DB.assets||[]).filter(x=>x.id!==id); return j(null,204); }
   }
+  if(url.includes('/storage/v1/object/list/backups')){
+    return j(DB.backupFiles||[]);
+  }
+  if(url.includes('/storage/v1/object/sign/backups/')){
+    const n=decodeURIComponent(url.split('/sign/backups/')[1]);
+    return j({signedURL:'/object/sign/backups/'+n+'?token=T'});
+  }
   if(url.includes('/rest/v1/fam_notify_prefs')){
     if(method==='GET') return j(DB.nprefs||[]);
     if(method==='POST'){ DB.nprefs=DB.nprefs||[]; const b=JSON.parse(opts.body);
@@ -1345,6 +1352,42 @@ async function cycleSpace(dom, A){
     assert(Array.isArray(parsed.tables.fam_debts) && parsed.tables.fam_debts[0].name === 'Mortgage', 'debts included');
     assert(parsed.tables.fam_settings.length === 1, 'settings included');
     assert(d.getElementById('backup-status').textContent.includes('rows exported'), 'status line reports completion');
+  }
+
+
+  console.log('--- Automatic backups list ---');
+  {
+    DB.settings=[]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[]; DB.assets=[]; DB.nprefs=[];
+    DB.backupFiles=[{name:'backup-2026-07-19.json', metadata:{size:204800}},
+                    {name:'backup-2026-07-18.json', metadata:{size:198000}},
+                    {name:'.emptyFolderPlaceholder', metadata:{}}];
+    const clicks=[];
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){ w.fetch = mockFetch;
+        w.HTMLAnchorElement.prototype.click = function(){ clicks.push(this.href); };
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}})); }});
+    await wait(200);
+    const d = dom.window.document, A = dom.window.App;
+    d.querySelector('#tabs button[data-view="admin"]').click();
+    await wait(120);
+    const bl = d.getElementById('backup-list').innerHTML;
+    assert(bl.includes('backup-2026-07-19.json') && bl.includes('200 KB'), 'nightly backups listed with size');
+    assert(!bl.includes('emptyFolderPlaceholder'), 'non-backup objects filtered out');
+    d.querySelector('[data-bkdl="backup-2026-07-19.json"]').click();
+    await wait(80);
+    assert(clicks.some(h=>h.includes('/storage/v1/object/sign/backups/backup-2026-07-19.json') && h.includes('token=T')), 'download uses a signed URL');
+
+    // graceful before migration 015
+    DB.backupFiles = null;
+    const dom2 = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){ w.fetch = function(url,opts){
+          if(url.includes('/storage/v1/object/list/backups')) return Promise.resolve({ok:false,status:404,text:()=>Promise.resolve('{"error":"bucket not found"}')});
+          return mockFetch(url,opts); };
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}})); }});
+    await wait(200);
+    dom2.window.document.querySelector('#tabs button[data-view="admin"]').click();
+    await wait(120);
+    assert(dom2.window.document.getElementById('backup-list').innerHTML.includes('migration 015'), 'missing bucket explained, not errored');
   }
 
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');

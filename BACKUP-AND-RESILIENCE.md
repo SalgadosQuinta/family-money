@@ -31,15 +31,35 @@ Recovery (WAL, restore to any minute) is available as an add-on.
 covers Postgres including auth. Action once: dashboard → Settings → confirm plan,
 and enable PITR if the budget allows (drops RPO to ~1 hour).
 
-**Layer 2 — Weekly off-platform JSON export (secondary, admin-run).**
-Julius Family Money → **Admin → Backups → "Download full backup (JSON)"**
-exports every `fam_*` table (all spaces the admin can see) plus settings, grants
-and notification prefs into one dated file.
-**Policy: every Sunday, and always immediately BEFORE running any migration.**
-Store the file outside Supabase and outside the house's single points of failure:
-a cloud drive (Google Drive/OneDrive) folder named `julius-money-backups/`.
-Retention: keep the last **8 weekly** files and the **first export of each month
-for 12 months**; delete older.
+**Layer 2 — Automatic nightly full export (secondary, zero admin effort).**
+The `fam-backup` Edge Function runs every night at **02:00 UTC** (pg_cron,
+migration 015): a service-role export of **every table** (all spaces, all users,
+including GTD `cloud_tasks`/`user_state`) written to the private `backups`
+storage bucket as `backup-YYYY-MM-DD.json`, with **60-day retention**
+self-pruned. Admins see and download these under **Admin → Backups**.
+If configured (§2a), each night's file is also pushed **off-platform to
+SharePoint** — that copy is what protects against loss of the Supabase project
+itself. Manual export remains one click for the **before-any-migration** snapshot.
+
+### 2a. SharePoint off-platform copy — one-off setup (~10 minutes)
+The function POSTs the backup JSON to a URL you give it; a Power Automate flow
+receives it and files it in SharePoint. No code, no Azure app registration:
+1. Power Automate (make.powerautomate.com, business M365 account) → **Create →
+   Instant cloud flow → skip → add trigger "When an HTTP request is received"**
+   (method POST, who can trigger: Anyone with the URL — the URL itself contains
+   an unguessable signature).
+2. Add action **SharePoint → Create file**: pick the site, folder
+   `Documents/julius-money-backups`, File Name expression:
+   `triggerOutputs()?['queries']?['filename']`, File Content expression:
+   `triggerBody()`.
+3. Save; copy the generated **HTTP POST URL**.
+4. Supabase dashboard → **Edge Functions → fam-backup → Secrets** → add
+   `SHAREPOINT_WEBHOOK_URL` = that URL. Done — next night's run reports
+   `"sharepoint": "sent"`.
+Treat the flow URL as a secret (anyone holding it can write files to that
+folder — nothing more). Alternative for the future: direct Microsoft Graph
+upload from the function (needs an Azure AD app + client credentials); the
+webhook route is deliberately chosen for simplicity.
 
 **Layer 3 — Receipts archive (monthly).**
 Storage bucket contents change slowly. Monthly, download the `receipts` bucket
@@ -57,8 +77,8 @@ Settings view also offers manual file backups; take one whenever Layer 2 runs.
 |---|---|---|
 | Continuous | Code committed to GitHub on every change | Claude/dev |
 | Daily, automatic | Supabase Pro backup | Supabase |
-| **Weekly (Sun)** | Admin → Backups → download JSON → cloud folder | Rodney |
-| Before ANY migration | Same JSON export first | Whoever migrates |
+| **Nightly 02:00 UTC, automatic** | fam-backup → `backups` bucket (+ SharePoint copy) | Nobody — it just runs |
+| Before ANY migration | Admin → Backups → manual JSON export | Whoever migrates |
 | Monthly (1st) | Receipts bucket zip → cloud folder | Rodney |
 | Quarterly | **Restore drill** (see §5) | Rodney + Claude |
 
@@ -107,7 +127,7 @@ A backup that has never been restored is a hope, not a backup. Every quarter:
 3. Restore them from the export via SQL Editor.
 4. Record in a note: date, time taken, anything that was unclear. Fix the
    unclear thing in this document.
-Target: the drill takes under 30 minutes. If it takes longer, the procedure —
+Also confirm during the drill: last night's automatic file exists in Admin → Backups AND in SharePoint. Target: the drill takes under 30 minutes. If it takes longer, the procedure —
 not the person — is at fault; improve it.
 
 ## 6. Resilience beyond backups
