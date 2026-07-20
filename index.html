@@ -1316,7 +1316,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v32';
+  var APP_BUILD = 'v33';
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
      is down we render the last-known data with a visible banner.
@@ -1349,6 +1349,12 @@ var App = (function(){
     }catch(e){}
   }
   function outboxReplay(){
+    if(outboxReplay._busy) return Promise.resolve();
+    outboxReplay._busy = true;
+    return outboxReplayInner().finally ? outboxReplayInner().finally(function(){ outboxReplay._busy = false; })
+      : outboxReplayInner().then(function(r){ outboxReplay._busy = false; return r; }, function(e){ outboxReplay._busy = false; throw e; });
+  }
+  function outboxReplayInner(){
     var q = outbox();
     if(!q.length || !state.session) return Promise.resolve();
     var item = q[0];
@@ -1356,18 +1362,19 @@ var App = (function(){
       .then(function(r){
         if(r.ok || r.status === 409){ // 409 = duplicate from an earlier partial replay — safe to drop
           q.shift(); outboxSave(q);
-          return outboxReplay();
+          return outboxReplayInner();
         }
         return r.text().then(function(t){
           q.shift(); outboxSave(q);
           toast('One offline entry couldn\u2019t sync (' + r.status + ') — please re-add it. ' + t.slice(0,80));
-          return outboxReplay();
+          return outboxReplayInner();
         });
       })
       .catch(function(e){ if(!isNetErr(e)) { q.shift(); outboxSave(q); } /* network still down: keep queue */ });
   }
   function offlineSet(on, cachedAt){
     if(OFFLINE.active === on && !cachedAt) { offlineBadge(); return; }
+    var wasActive = OFFLINE.active;
     OFFLINE.active = on;
     var el = document.getElementById('offline-banner');
     if(on){
@@ -1381,7 +1388,7 @@ var App = (function(){
       el.textContent = 'Offline — showing saved data' + (cachedAt ? ' from ' + new Date(cachedAt).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'}) : '') + (outbox().length ? ' · ' + outbox().length + ' change(s) waiting to sync' : '');
     } else {
       if(el && el.parentNode) el.parentNode.removeChild(el);
-      if(outbox().length) outboxReplay().then(function(){ if(!outbox().length){ toast('Offline changes synced.'); if(typeof switchSpaceReload === 'function' && state.session) switchSpaceReload(); } });
+      if(wasActive && outbox().length) outboxReplay().then(function(){ if(!outbox().length){ toast('Offline changes synced.'); if(typeof switchSpaceReload === 'function' && state.session) switchSpaceReload(); } });
     }
     offlineBadge();
   }
