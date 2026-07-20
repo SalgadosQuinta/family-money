@@ -1435,7 +1435,7 @@ async function cycleSpace(dom, A){
     w2.dispatchEvent(new w2.Event('online'));
     await wait(200);
     assert(JSON.parse(w2.localStorage.getItem('fm-outbox:'+UID)||'[]').length===0, 'outbox empty after replay');
-    assert(posted.length===1, 'queued expense replayed exactly once');
+    assert(posted.length===1, 'queued expense replayed exactly once (posted='+posted.length+')');
   }
 
   // ---- Membership check resilience ----

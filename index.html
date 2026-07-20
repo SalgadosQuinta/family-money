@@ -1316,7 +1316,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v33';
+  var APP_BUILD = 'v34';
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
      is down we render the last-known data with a visible banner.
@@ -1351,8 +1351,9 @@ var App = (function(){
   function outboxReplay(){
     if(outboxReplay._busy) return Promise.resolve();
     outboxReplay._busy = true;
-    return outboxReplayInner().finally ? outboxReplayInner().finally(function(){ outboxReplay._busy = false; })
-      : outboxReplayInner().then(function(r){ outboxReplay._busy = false; return r; }, function(e){ outboxReplay._busy = false; throw e; });
+    var p = outboxReplayInner();
+    var done = function(){ outboxReplay._busy = false; };
+    return p.then(function(r){ done(); return r; }, function(e){ done(); throw e; });
   }
   function outboxReplayInner(){
     var q = outbox();
