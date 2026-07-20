@@ -214,6 +214,7 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
   <nav class="tabs" id="tabs">
     <button data-view="dashboard" class="active">Dashboard</button>
     <button data-view="bills">Bills</button>
+    <button data-view="income">Income</button>
     <button data-view="expenses">Expenses</button>
     <button data-view="planner">Planner</button>
     <button data-view="assets">Assets</button>
@@ -303,6 +304,25 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
   </section>
 
   <!-- EXPENSES -->
+  <section id="view-income" style="display:none">
+    <div class="row" style="margin-bottom:12px">
+      <span class="eyebrow">Expected income &amp; receipts</span>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select id="income-sort" style="width:auto;padding:6px 8px;font-size:13px">
+          <option value="expected">Sort: expected date</option>
+          <option value="amount">Sort: amount</option>
+          <option value="person">Sort: source</option>
+          <option value="status">Sort: status</option>
+        </select>
+        <button class="btn primary" id="income-add-btn">Add income</button>
+      </div>
+    </div>
+    <div class="panel"><div id="income-list"><div class="empty">Loading…</div></div></div>
+    <div class="panel">
+      <h2>Recently received</h2>
+      <div id="income-received-list"><div class="empty">Loading…</div></div>
+    </div>
+  </section>
   <section id="view-expenses" style="display:none">
     <div class="panel">
       <h2>Quick expense</h2>
@@ -606,6 +626,21 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
 </div>
 
 <!-- Mark paid modal -->
+<div class="modal-wrap" id="received-modal">
+  <div class="modal">
+    <h3>Mark received</h3>
+    <p class="small muted" id="rm-name" style="margin-top:0"></p>
+    <label class="f" for="rm-date">Date received</label>
+    <input id="rm-date" type="date">
+    <label class="f" for="rm-note">Note</label>
+    <input id="rm-note" placeholder="Optional">
+    <div id="rm-err" class="small" style="color:var(--red);margin-top:8px;display:none"></div>
+    <div class="btnrow">
+      <button class="btn" data-close>Cancel</button>
+      <button class="btn primary" id="rm-save">Mark received</button>
+    </div>
+  </div>
+</div>
 <div class="modal-wrap" id="paid-modal">
   <div class="modal">
     <h3>Mark paid</h3>
@@ -616,6 +651,8 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
       <div><label class="f">Currency</label>
         <input id="pm-currency" disabled></div>
     </div>
+    <label class="f" for="pm-date">Date paid</label>
+    <input id="pm-date" type="date">
     <label class="f" for="pm-account">Paid from account</label>
     <select id="pm-account" class="acct-select"></select>
     <label class="f" for="pm-note">Note</label>
@@ -1279,7 +1316,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v31';
+  var APP_BUILD = 'v32';
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
      is down we render the last-known data with a visible banner.
@@ -1634,6 +1671,82 @@ var App = (function(){
       state.income = []; state.planItems = [];
     });
   }
+  function loadIncomeAll(){
+    return apiJSON('/rest/v1/fam_income?select=*&order=on_date.desc.nullslast&limit=300' + spaceFilter())
+      .then(function(r){ state.incomeAll = r || []; })
+      .catch(function(){ state.incomeAll = state.incomeAll || []; });
+  }
+  function incomeExpected(i){ return i.on_date || i.week_date || null; }
+  function incomeStatus(i){
+    if(i.received_at) return 'received';
+    var ex = incomeExpected(i);
+    if(ex && ex < todayISO()) return 'overdue';
+    return 'outstanding';
+  }
+  function incomeRow(i){
+    var st = incomeStatus(i);
+    var ex = incomeExpected(i);
+    var badge = st === 'received' ? '<span class="badge" style="background:rgba(80,200,120,.15);color:var(--green,#4dc87a)">Received ' + esc(fmtDate(i.received_at)) + '</span>'
+      : st === 'overdue' ? '<span class="badge red">Overdue</span>'
+      : '<span class="badge">Outstanding</span>';
+    return '<div class="item" data-id="' + esc(i.id) + '">' +
+      '<div><div><strong>' + esc(i.person) + '</strong>' +
+        (i.recurrence && i.recurrence !== 'none' ? '<span class="badge brass">' + esc(i.recurrence) + '</span>' : '') +
+        badge + '</div>' +
+      '<div class="small muted">Expected ' + (ex ? esc(fmtDate(ex)) : '—') +
+        (i.account_id ? ' · ' + esc(accountName(i.account_id)) : '') +
+        (i.note ? ' · ' + esc(i.note) : '') + '</div>' +
+      '<div class="list-actions">' +
+        (st === 'received'
+          ? '<button class="linkbtn" data-act="unreceive" data-id="' + esc(i.id) + '">Undo received</button>'
+          : '<button class="linkbtn" data-act="receive" data-id="' + esc(i.id) + '">Mark received</button>') +
+        '<button class="linkbtn" data-act="incedit" data-id="' + esc(i.id) + '">Edit</button>' +
+      '</div></div>' +
+      '<div class="amount' + (st === 'overdue' ? ' overdue' : '') + '">' + esc(fmtMoney(i.amount, i.currency)) + '</div></div>';
+  }
+  function renderIncome(){
+    var el = $('income-list'); if(!el) return;
+    var rows = (state.incomeAll || []).filter(function(i){ return !i.received_at; });
+    var sort = state.sortIncome || 'expected';
+    rows.sort(function(a,b){
+      if(sort === 'amount') return Number(b.amount) - Number(a.amount);
+      if(sort === 'person') return String(a.person).localeCompare(String(b.person));
+      if(sort === 'status') return incomeStatus(a).localeCompare(incomeStatus(b));
+      return String(incomeExpected(a) || '9999').localeCompare(String(incomeExpected(b) || '9999'));
+    });
+    el.innerHTML = rows.length ? rows.map(incomeRow).join('') : '<div class="empty">Nothing outstanding — all expected income received.</div>';
+    var rl = $('income-received-list'); if(!rl) return;
+    var rec = (state.incomeAll || []).filter(function(i){ return i.received_at; })
+      .sort(function(a,b){ return String(b.received_at).localeCompare(String(a.received_at)); }).slice(0, 25);
+    rl.innerHTML = rec.length ? rec.map(incomeRow).join('') : '<div class="empty">Nothing received yet.</div>';
+  }
+  function openReceivedModal(inc){
+    state.receivingIncome = inc;
+    $('rm-name').textContent = inc.person + ' — ' + fmtMoney(inc.amount, inc.currency) + (incomeExpected(inc) ? ' expected ' + fmtDate(incomeExpected(inc)) : '');
+    $('rm-date').value = todayISO();
+    $('rm-note').value = inc.note || '';
+    $('rm-err').style.display = 'none';
+    modalOpen('received-modal');
+  }
+  function confirmReceived(){
+    var i = state.receivingIncome; if(!i) return;
+    var d = $('rm-date').value;
+    if(!d){ $('rm-err').textContent = 'Choose the date received.'; $('rm-err').style.display = ''; return; }
+    var btn = $('rm-save'); btn.disabled = true;
+    apiJSON('/rest/v1/fam_income?id=eq.' + i.id, {method:'PATCH', headers:{'Prefer':'return=minimal'},
+      body: JSON.stringify({received_at:d, received_by:state.session.user.id, note:($('rm-note').value.trim() || null)})})
+      .then(function(){ modalClose(); toast('Marked received'); return loadIncomeAll(); })
+      .then(function(){ renderIncome(); })
+      .catch(function(e){ $('rm-err').textContent = e.message; $('rm-err').style.display = ''; })
+      .then(function(){ btn.disabled = false; });
+  }
+  function undoReceived(id){
+    apiJSON('/rest/v1/fam_income?id=eq.' + id, {method:'PATCH', headers:{'Prefer':'return=minimal'},
+      body: JSON.stringify({received_at:null, received_by:null})})
+      .then(function(){ toast('Back to outstanding'); return loadIncomeAll(); })
+      .then(function(){ renderIncome(); })
+      .catch(function(e){ toast(e.message); });
+  }
   function loadAccounts(){
     return apiJSON('/rest/v1/fam_accounts?select=*&archived=eq.false&order=name.asc' + spaceFilter())
       .then(function(r){ state.accounts = r || []; })
@@ -1744,7 +1857,7 @@ var App = (function(){
 
   function setView(v){
     state.view = v;
-    ['dashboard','bills','expenses','planner','assets','debts','analysis','admin'].forEach(function(name){
+    ['dashboard','bills','income','expenses','planner','assets','debts','analysis','admin'].forEach(function(name){
       $('view-' + name).style.display = (name === v && state.isMember) ? '' : 'none';
     });
     document.querySelectorAll('#tabs button').forEach(function(b){
@@ -1760,7 +1873,7 @@ var App = (function(){
     var html = '<div class="item" data-id="' + esc(b.id) + '">' +
       '<div><div><strong>' + esc(b.name) + '</strong>' +
         (b.recurrence !== 'none' ? '<span class="badge brass">' + esc(b.recurrence) + '</span>' : '') +
-        (od ? '<span class="badge red">Overdue</span>' : '') + '</div>' +
+        (od ? '<span class="badge red">Overdue</span>' : '<span class="badge">Outstanding</span>') + '</div>' +
       '<div class="small muted">' + esc(fmtDate(b.due_date)) + ' · ' +
         '<span class="' + (od ? 'overdue' : '') + '">' + esc(when) + '</span> · ' +
         esc(b.category || 'General') +
@@ -2164,7 +2277,7 @@ var App = (function(){
     var p = state.editingIncome
       ? apiJSON('/rest/v1/fam_income?id=eq.' + state.editingIncome.id, {method:'PATCH', body:JSON.stringify(body)})
       : apiJSON('/rest/v1/fam_income', {method:'POST', headers:{'Prefer':'return=minimal'}, body:JSON.stringify(spaceBody(body))});
-    p.then(function(){ modalClose('inc-modal'); return loadPlanner().then(renderPlanner); })
+    p.then(function(){ modalClose('inc-modal'); return Promise.all([loadPlanner(), loadIncomeAll()]).then(renderPlanner); })
      .catch(function(e){ errEl.textContent = e.message; errEl.style.display=''; });
   }
 
@@ -3305,7 +3418,7 @@ var App = (function(){
 
   function renderAll(){
     renderNetWorth();
-    renderBills(); renderPayments(); renderExpenses(); renderDashboard(); renderPlanner();
+    renderBills(); renderPayments(); renderExpenses(); renderIncome(); renderDashboard(); renderPlanner();
     renderDebts(); renderDebtPayments(); renderNetPosition(); renderAnalysis(); renderAdmin(); renderAssets(); fillPaybackSelect(); if(state.ppMode === 'date') renderPaybackDate();
     fillAccountSelects(); setupNotifCard();
   }
@@ -3388,6 +3501,7 @@ var App = (function(){
     $('pm-amount').value = bill.amount;
     $('pm-currency').value = bill.currency;
     $('pm-note').value = '';
+    if($('pm-date')) $('pm-date').value = todayISO();
     $('pm-account').value = bill.account_id || '';
     $('pm-rollnote').textContent = bill.recurrence === 'none'
       ? 'One-off bill — it will be marked complete.'
@@ -3402,8 +3516,10 @@ var App = (function(){
     var errEl = $('pm-err');
     if(!(amount >= 0)){ errEl.textContent = 'Enter a valid amount.'; errEl.style.display = ''; return; }
     var btn = $('pm-save'); btn.disabled = true;
+    var paidDate = ($('pm-date') && $('pm-date').value) || todayISO();
     var payment = {
       bill_id:b.id, bill_name:b.name, amount:amount, currency:b.currency,
+      paid_at: paidDate + 'T12:00:00Z',
       paid_by: state.session.user.id, due_date:b.due_date,
       account_id:($('pm-account').value || null),
       note:($('pm-note').value.trim() || null)
@@ -3498,6 +3614,9 @@ var App = (function(){
     $('bill-add-btn').addEventListener('click', function(){ openBillModal(null); });
     $('bm-save').addEventListener('click', saveBill);
     $('pm-save').addEventListener('click', confirmPaid);
+    $('rm-save').addEventListener('click', confirmReceived);
+    if($('income-sort')) $('income-sort').addEventListener('change', function(){ state.sortIncome = this.value; renderIncome(); });
+    if($('income-add-btn')) $('income-add-btn').addEventListener('click', function(){ openIncomeModal(null); });
     $('ex-save-btn').addEventListener('click', saveExpense);
     $('cm-yes').addEventListener('click', function(){
       modalClose('confirm-modal');
@@ -3785,6 +3904,9 @@ var App = (function(){
             .catch(function(err){ toast(err.message); });
         });
       }
+      else if(act === 'receive'){ openReceivedModal((state.incomeAll||[]).find(function(x){ return x.id === id; })); }
+      else if(act === 'unreceive'){ undoReceived(id); }
+      else if(act === 'incedit'){ var _inc=(state.incomeAll||[]).find(function(x){ return x.id === id; }); if(_inc) openIncomeModal(_inc); }
       else if(act === 'asedit'){ openAssetModal(state.assets.find(function(x){ return x.id === id; })); }
       else if(act === 'dpay'){ openDebtPayModal(state.debts.find(function(x){ return x.id === id; })); }
       else if(act === 'dedit'){ openDebtModal(state.debts.find(function(x){ return x.id === id; })); }
@@ -3852,7 +3974,7 @@ var App = (function(){
           safe(loadBills,'Bills'), safe(loadPayments,'Payments'), safe(loadExpenses,'Expenses'),
           safe(loadPlanner,'Planner'), safe(loadAccounts,'Accounts'), safe(loadDebts,'Debts'),
           safe(loadDebtPayments,'Debt payments'), safe(loadBudgets,'Budgets'), safe(loadSnapshots,'Snapshots'),
-          safe(loadSettings,'Settings'), safe(loadAssets,'Assets')
+          safe(loadSettings,'Settings'), safe(loadAssets,'Assets'), safe(loadIncomeAll,'Income')
         ]).then(function(){ return takeSnapshots().catch(function(e){ failures.push('Snapshot: ' + (e.message||'failed')); }); })
           .then(function(){
             renderAll();

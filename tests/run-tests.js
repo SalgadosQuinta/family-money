@@ -1456,6 +1456,52 @@ async function cycleSpace(dom, A){
     assert(!nm.textContent.includes('Ask the admin to add you'), 'does not falsely claim non-membership on network failure');
   }
 
+  // ---- Income tab ----
+  console.log('--- Income tab ---');
+  {
+    const incomeRows = [
+      {id:'i1', person:'Langham Hall', amount:'31020.00', currency:'GBP', on_date:'2099-08-01', week_date:'2099-08-07', recurrence:'none', received_at:null, space:'family'},
+      {id:'i2', person:'Tapiwa Salary', amount:'1400.00', currency:'GBP', on_date:'2020-01-03', week_date:'2020-01-03', recurrence:'weekly', received_at:null, space:'family'},
+      {id:'i3', person:'Farm eggs', amount:'200.00', currency:'USD', on_date:'2026-07-01', week_date:'2026-07-03', recurrence:'none', received_at:'2026-07-02', space:'family'}
+    ];
+    let patches = [];
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){
+        w.fetch = function(url, opts){
+          url = String(url);
+          if(opts && opts.method === 'PATCH' && url.includes('/rest/v1/fam_income')){
+            patches.push({url, body: JSON.parse(opts.body)});
+            return Promise.resolve({ok:true, status:204, text:()=>Promise.resolve('')});
+          }
+          if(url.includes('/rest/v1/fam_income') && (!opts || !opts.method || opts.method === 'GET'))
+            return Promise.resolve({ok:true, status:200, text:()=>Promise.resolve(JSON.stringify(incomeRows))});
+          return mockFetch(url, opts);
+        };
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}}));
+      }});
+    await wait(300);
+    const d = dom.window.document;
+    // Tab present and section renders
+    assert(d.querySelector('#tabs button[data-view="income"]'), 'Income tab button exists');
+    const list = d.getElementById('income-list');
+    assert(list && list.textContent.includes('Langham Hall'), 'outstanding income listed');
+    assert(list.textContent.includes('Overdue'), 'past expected date shows Overdue');
+    assert(list.textContent.includes('Outstanding'), 'future expected date shows Outstanding');
+    assert(!list.textContent.includes('Farm eggs'), 'received income not in outstanding list');
+    const rec = d.getElementById('income-received-list');
+    assert(rec && rec.textContent.includes('Farm eggs') && rec.textContent.includes('Received'), 'received list shows receipt with date');
+    // Mark received flow: open modal, confirm, PATCH carries received_at + received_by
+    const btn = list.querySelector('[data-act="receive"]');
+    assert(btn, 'Mark received action present');
+    btn.click(); await wait(50);
+    assert(d.getElementById('rm-date').value, 'date defaults to today');
+    d.getElementById('rm-date').value = '2026-07-19';
+    d.getElementById('rm-save').click(); await wait(150);
+    assert(patches.length === 1 && patches[0].body.received_at === '2026-07-19' && patches[0].body.received_by === UID, 'PATCH records date and receiver');
+    // Bills paid modal has the date field defaulting to today
+    assert(d.getElementById('pm-date'), 'paid modal has a date field');
+  }
+
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
