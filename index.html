@@ -19,6 +19,7 @@
 header{border-bottom:2px solid var(--brass)}
 [data-space="private"] header{border-bottom-color:var(--purple)}
 [data-space="business"] header{border-bottom-color:var(--green)}
+.amount.in{color:var(--green)}
 [data-space="farm"] header{border-bottom-color:var(--farm)}
 [data-space="private"] .eyebrow{color:var(--purple)}
 [data-theme="light"]{
@@ -1316,7 +1317,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v34';
+  var APP_BUILD = 'v35';
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
      is down we render the last-known data with a visible banner.
@@ -1710,7 +1711,7 @@ var App = (function(){
           : '<button class="linkbtn" data-act="receive" data-id="' + esc(i.id) + '">Mark received</button>') +
         '<button class="linkbtn" data-act="incedit" data-id="' + esc(i.id) + '">Edit</button>' +
       '</div></div>' +
-      '<div class="amount' + (st === 'overdue' ? ' overdue' : '') + '">' + esc(fmtMoney(i.amount, i.currency)) + '</div></div>';
+      '<div class="amount' + (st === 'overdue' ? ' overdue' : ' in') + '">' + esc(fmtMoney(i.amount, i.currency)) + '</div></div>';
   }
   function renderIncome(){
     var el = $('income-list'); if(!el) return;
@@ -2027,7 +2028,7 @@ var App = (function(){
       var incCards = state.income.filter(function(i){ return i.week_date === w; }).map(function(i){
         return '<div class="card income" draggable="true" data-kind="income" data-id="' + esc(i.id) + '">' +
           '<div class="crow"><span class="ctitle">' + esc(i.person) + (i.recurrence && i.recurrence !== 'none' ? ' <span class="badge brass">' + esc(i.recurrence) + '</span>' : '') + (i.on_date ? ' <span class="badge">' + esc(fmtShort(i.on_date)) + '</span>' : '') + '</span>' +
-          '<span class="amount">' + esc(fmtMoney(i.amount, i.currency)) + '</span></div></div>';
+          '<span class="amount in">' + esc(fmtMoney(i.amount, i.currency)) + '</span></div></div>';
       }).join('');
       var billCards = state.bills.filter(function(b){ return !b.archived && fridayOf(b.due_date) === w; }).map(function(b){
         return '<div class="card bill-card" draggable="true" data-kind="bill" data-id="' + esc(b.id) + '">' +
@@ -2130,11 +2131,11 @@ var App = (function(){
     $('day-date').value = iso;
     var rows = [];
     state.bills.forEach(function(b){ if(!b.archived && b.due_date === iso) rows.push({t:'Bill due', name:b.name, amt:-Number(b.amount), ccy:b.currency, edit:{kind:'bill', id:b.id}}); });
-    state.income.forEach(function(i){ if((i.on_date || '') === iso) rows.push({t:'Income', name:i.person, amt:Number(i.amount), ccy:i.currency, edit:{kind:'income', id:i.id}}); });
+    state.income.forEach(function(i){ if((i.on_date || '') === iso) rows.push({t:'Income', cls:'in', name:i.person, amt:Number(i.amount), ccy:i.currency, edit:{kind:'income', id:i.id}}); });
     state.planItems.forEach(function(it){ if((it.on_date || '') === iso) rows.push({t:it.paid ? 'Item · paid' : 'Item', name:it.title, amt:-Number(it.amount), ccy:it.currency, edit:{kind:'item', id:it.id}}); });
     // week-anchored entries surface on their Friday
     if(fridayOf(iso) === iso){
-      state.income.forEach(function(i){ if(!i.on_date && i.week_date === iso) rows.push({t:'Income (week)', name:i.person, amt:Number(i.amount), ccy:i.currency, edit:{kind:'income', id:i.id}}); });
+      state.income.forEach(function(i){ if(!i.on_date && i.week_date === iso) rows.push({t:'Income (week)', cls:'in', name:i.person, amt:Number(i.amount), ccy:i.currency, edit:{kind:'income', id:i.id}}); });
       state.planItems.forEach(function(it){ if(!it.on_date && it.week_date === iso) rows.push({t:it.paid ? 'Item (week) · paid' : 'Item (week)', name:it.title, amt:-Number(it.amount), ccy:it.currency, edit:{kind:'item', id:it.id}}); });
     }
     var net = {};
@@ -2991,7 +2992,7 @@ var App = (function(){
       var ccys = Object.keys(c.net);
       if(!ccys.length) return '';
       return '<div class="item"><div><strong>' + esc(monthLabel(ym)) + '</strong>' +
-        '<div class="small muted">In ' + esc(Object.keys(c.inc).map(function(k){ return fmtMoney(c.inc[k],k); }).join(' · ') || '—') +
+        '<div class="small">In <span style="color:var(--green)">' + esc(Object.keys(c.inc).map(function(k){ return fmtMoney(c.inc[k],k); }).join(' · ') || '—') + '</span>' +
         ' · Out ' + esc(Object.keys(c.out).map(function(k){ return fmtMoney(c.out[k],k); }).join(' · ') || '—') +
         ' · Debt paid ' + esc(Object.keys(c.debt).map(function(k){ return fmtMoney(c.debt[k],k); }).join(' · ') || '—') + '</div></div>' +
         '<div class="amount">' + ccys.map(function(k){
