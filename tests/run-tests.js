@@ -394,11 +394,14 @@ async function cycleSpace(dom, A){
     // Plan for later: creates a linked planner item, no payment, no balance change
     d.querySelector('button[data-act="adddebtpay"]').click(); await wait(60);
     d.getElementById('dp-amount').value = '300';
+    const planDate = A.addWeeksISO(A.currentFriday(), 2); // two weeks ahead
+    d.getElementById('dp-date').value = planDate;
     d.getElementById('dp-plan').click(); await wait(150);
     assert(DB.debtPayments.length === 0, 'planning records no payment');
     assert(parseFloat(DB.debts[0].balance) === 8500, 'planning leaves balance untouched');
     const planned = DB.planner.find(x=>x.debt_id === 'dbt1');
     assert(planned && parseFloat(planned.amount) === 300, 'planned item linked to the debt');
+    assert(planned.week_date === planDate && planned.on_date === planDate, 'planned payment lands in the week of the chosen date');
     assert(d.getElementById('pl-board').innerHTML.includes('planned'), 'planned badge on the board');
 
     // Tick paid -> real payment + balance reduced; untick -> reversed

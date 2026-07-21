@@ -909,7 +909,7 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
       <div><label class="f">Currency</label>
         <input id="dp-currency" disabled></div>
     </div>
-    <label class="f" for="dp-date">Date paid</label>
+    <label class="f" for="dp-date">Date (when paid, or when you plan to pay)</label>
     <input id="dp-date" type="date">
     <label class="f" for="dp-account">Paid from account</label>
     <select id="dp-account" class="acct-select"></select>
@@ -1345,7 +1345,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v40';
+  var APP_BUILD = 'v41';
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
      is down we render the last-known data with a visible banner.
@@ -3113,7 +3113,7 @@ var App = (function(){
     sel.onchange = applyDebt;
     applyDebt();
     $('dp-note').value = '';
-    $('dp-date').value = (weekISO && weekISO < todayISO()) ? weekISO : todayISO();
+    $('dp-date').value = weekISO || todayISO();
     state.planningDebtWeek = weekISO || currentFriday();
     $('dp-plan').style.display = '';
     $('dp-err').style.display = 'none';
@@ -3125,9 +3125,10 @@ var App = (function(){
     if(!d){ return; }
     if(!(amount > 0)){ errEl.textContent = 'Enter a valid amount.'; errEl.style.display=''; return; }
     var btn = $('dp-plan'); btn.disabled = true;
+    var planDate = ($('dp-date') && $('dp-date').value) || state.planningDebtWeek || todayISO();
     apiJSON('/rest/v1/fam_planner_items', {method:'POST', headers:{'Prefer':'return=minimal'}, body:JSON.stringify(spaceBody({
       title:'Debt \u00b7 ' + d.name, amount:amount, currency:d.currency,
-      week_date: state.planningDebtWeek, debt_id: d.id, recurrence:'none',
+      week_date: fridayOf(planDate), on_date: planDate, debt_id: d.id, recurrence:'none',
       account_id:($('dp-account').value || null), note:($('dp-note').value.trim() || null)
     }))}).then(function(){
       modalClose('dpay-modal');
