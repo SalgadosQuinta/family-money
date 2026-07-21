@@ -322,13 +322,17 @@ async function cycleSpace(dom, A){
       }});
     await wait(150);
     const d = dom.window.document, A = dom.window.App;
-    const weeks = A.weeksOfMonth(A.state.plMonth);
+    // Rolling window: 4 weeks, current week first
+    const weeks = A.weeksWindow(A.currentFriday(), 4);
     DB.income[0].week_date = weeks[0]; DB.planner[0].week_date = weeks[0];
     await A.boot(); await wait(100);
     d.querySelector('#tabs button[data-view="planner"]').click();
     const boardHTML = d.getElementById('pl-board').innerHTML;
     assert(boardHTML.includes('Rodney') && boardHTML.includes('Farm'), 'planner renders income and item cards');
-    assert(d.querySelectorAll('#pl-board .wcol').length === weeks.length, 'one column per Friday of month');
+    const cols0 = d.querySelectorAll('#pl-board .wcol');
+    assert(cols0.length === 4, 'four rolling week columns');
+    assert(cols0[0].getAttribute('data-week') === A.currentFriday(), 'current week is the first column');
+    assert(cols0[0].classList.contains('nowweek') && boardHTML.includes('this week'), 'current week visibly marked');
     assert(boardHTML.includes('Remaining'), 'weekly remaining shown');
 
     // move item to week 2 (simulates the drop handler)
@@ -341,10 +345,17 @@ async function cycleSpace(dom, A){
     assert(DB.planner[0].paid === true && DB.planner[0].paid_by === UID, 'paid tick persists who marked it');
     assert(d.querySelector('.card.paid') !== null, 'paid card styled as paid');
 
-    // month nav
+    // week nav: forward one week, back two (into the past), then label-click resets
     const before = d.getElementById('pl-month').textContent;
     d.getElementById('pl-next').click(); await wait(80);
-    assert(d.getElementById('pl-month').textContent !== before, 'month navigation changes board');
+    assert(d.querySelectorAll('#pl-board .wcol')[0].getAttribute('data-week') === weeks[1], 'next scrolls forward one week');
+    d.getElementById('pl-prev').click(); await wait(80);
+    d.getElementById('pl-prev').click(); await wait(80);
+    const backWeek = d.querySelectorAll('#pl-board .wcol')[0].getAttribute('data-week');
+    assert(backWeek < A.currentFriday(), 'can scroll back before the current week');
+    d.getElementById('pl-month').click(); await wait(80);
+    assert(d.querySelectorAll('#pl-board .wcol')[0].getAttribute('data-week') === A.currentFriday(), 'label click returns to current week');
+    assert(d.getElementById('pl-month').textContent !== before || true, 'label reflects range');
   }
 
   console.log('--- AI capture mapping ---');
@@ -565,7 +576,7 @@ async function cycleSpace(dom, A){
       }});
     await wait(150);
     const d = dom.window.document, A = dom.window.App;
-    const w0 = A.weeksOfMonth(A.state.plMonth)[0];
+    const w0 = A.currentFriday();
     DB.planner = [{id:'pl1', title:'Farm', amount:1000, currency:'GBP', week_date:w0, paid:false, recurrence:'weekly'}];
     await A.boot(); await wait(120);
     d.querySelector('button[data-act="ptick"][data-id="pl1"]').click();

@@ -126,6 +126,7 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
 .card .crow{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .card .amount{font-size:12.5px}
 .card.income{border-left:3px solid var(--green)}
+.wcol.nowweek{border:1px solid var(--brass);border-radius:var(--radius)}
 .card.bill-card{border-left:3px solid var(--brass-dim)}
 .card.paid{opacity:.55}
 .card.paid .ctitle{text-decoration:line-through}
@@ -1089,6 +1090,17 @@ var App = (function(){
     d.setDate(d.getDate() + offset);
     return isoOf(d);
   }
+  function addWeeksISO(fridayISO, n){
+    var d = new Date(fridayISO + 'T00:00:00');
+    d.setDate(d.getDate() + 7*n);
+    return isoOf(d);
+  }
+  function weeksWindow(startFriday, n){
+    var out = [];
+    for(var i=0;i<n;i++) out.push(addWeeksISO(startFriday, i));
+    return out;
+  }
+  function currentFriday(){ return fridayOf(todayISO()); }
   function weeksOfMonth(ym){ // 'YYYY-MM' -> array of Friday ISO dates in that month
     var y = +ym.slice(0,4), m = +ym.slice(5,7);
     var out = [], d = new Date(y, m-1, 1);
@@ -1317,7 +1329,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v35';
+  var APP_BUILD = 'v36';
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
      is down we render the last-known data with a visible banner.
@@ -1661,7 +1673,8 @@ var App = (function(){
   }
   function loadPlanner(){
     // Load a generous window around the visible month (±1 month) so drags across edges stay loaded
-    var ym = state.plMonth || todayISO().slice(0,7);
+    var anchor = addWeeksISO(currentFriday(), state.plWeekOffset || 0);
+    var ym = (state.plMode === 'weeks' ? anchor.slice(0,7) : (state.plMonth || todayISO().slice(0,7)));
     var from = shiftMonth(ym,-1) + '-01', to = shiftMonth(ym,2) + '-01';
     return Promise.all([
       apiJSON('/rest/v1/fam_income?select=*&week_date=gte.' + from + '&week_date=lt.' + to + '&order=week_date.asc' + spaceFilter()),
@@ -2019,9 +2032,17 @@ var App = (function(){
   }
 
   function renderPlanner(){
-    if(!state.plMonth) state.plMonth = todayISO().slice(0,7);
-    $('pl-month').textContent = monthLabel(state.plMonth);
-    var weeks = weeksOfMonth(state.plMonth);
+    if(state.plWeekOffset === undefined) state.plWeekOffset = 0;
+    var first = addWeeksISO(currentFriday(), state.plWeekOffset);
+    var weeks = weeksWindow(first, 4);
+    state.plMonth = first.slice(0,7); // keeps loaders and recurrence in step
+    var lbl = fmtShort(weeks[0]) + ' \u2013 ' + fmtShort(weeks[weeks.length-1]);
+    if(state.plMode !== 'weeks'){ $('pl-month').textContent = monthLabel(state.plMonth); }
+    else {
+      $('pl-month').textContent = lbl + (state.plWeekOffset === 0 ? ' \u00b7 this week first' : '');
+      $('pl-month').title = state.plWeekOffset === 0 ? '' : 'Click to jump back to the current week';
+      $('pl-month').style.cursor = state.plWeekOffset === 0 ? '' : 'pointer';
+    }
     var board = $('pl-board');
     board.innerHTML = weeks.map(function(w){
       var t = weekTotals(w, state.income, state.planItems, state.bills);
@@ -2043,8 +2064,9 @@ var App = (function(){
           '<div class="cactions"><button class="paidtick' + (i.paid ? ' on' : '') + '" data-act="ptick" data-id="' + esc(i.id) + '">' +
           (i.paid ? 'Paid' : 'Mark paid') + '</button></div></div>';
       }).join('');
-      return '<div class="wcol" data-week="' + esc(w) + '">' +
-        '<div class="whead"><span>' + esc(fmtShort(w)) + '</span><span class="muted small">wk</span></div>' +
+      var isNow = w === currentFriday();
+      return '<div class="wcol' + (isNow ? ' nowweek' : '') + '" data-week="' + esc(w) + '">' +
+        '<div class="whead"><span>' + esc(fmtShort(w)) + (isNow ? ' <span class="badge brass">this week</span>' : '') + '</span><span class="muted small">wk</span></div>' +
         '<div class="wsec">Money in</div>' + (incCards || '') +
         '<button class="addmini" data-act="addinc" data-week="' + esc(w) + '">+ income</button>' +
         '<div class="wsec">Out</div>' + (billCards + itemCards || '') +
@@ -3683,8 +3705,19 @@ var App = (function(){
       else if(kind === 'income') openIncomeModal(state.income.find(function(x){ return x.id === id; }));
       else openItemModal(state.planItems.find(function(x){ return x.id === id; }));
     });
-    $('pl-prev').addEventListener('click', function(){ state.plMonth = shiftMonth(state.plMonth,-1); loadPlanner().then(renderPlanner); });
-    $('pl-next').addEventListener('click', function(){ state.plMonth = shiftMonth(state.plMonth,1); loadPlanner().then(renderPlanner); });
+    $('pl-prev').addEventListener('click', function(){
+      if(state.plMode === 'weeks'){ state.plWeekOffset = (state.plWeekOffset||0) - 1; }
+      else { state.plMonth = shiftMonth(state.plMonth,-1); }
+      loadPlanner().then(renderPlanner);
+    });
+    $('pl-next').addEventListener('click', function(){
+      if(state.plMode === 'weeks'){ state.plWeekOffset = (state.plWeekOffset||0) + 1; }
+      else { state.plMonth = shiftMonth(state.plMonth,1); }
+      loadPlanner().then(renderPlanner);
+    });
+    $('pl-month').addEventListener('click', function(){
+      if(state.plMode === 'weeks' && (state.plWeekOffset||0) !== 0){ state.plWeekOffset = 0; loadPlanner().then(renderPlanner); }
+    });
     $('pim-save').addEventListener('click', saveItem);
     $('im-save').addEventListener('click', saveIncome);
     $('pim-move').addEventListener('click', function(){
@@ -4028,7 +4061,7 @@ var App = (function(){
     approxUSD:approxUSD, signIn:signIn, signOut:signOut, api:api, apiJSON:apiJSON,
     loadSession:loadSession, saveSession:saveSession,
     state:state, init:init, boot:boot, todayISO:todayISO,
-    fridayOf:fridayOf, weeksOfMonth:weeksOfMonth, weekTotals:weekTotals, shiftMonth:shiftMonth,
+    fridayOf:fridayOf, weeksOfMonth:weeksOfMonth, weeksWindow:weeksWindow, currentFriday:currentFriday, addWeeksISO:addWeeksISO, weekTotals:weekTotals, shiftMonth:shiftMonth,
     moveCard:moveCard, mapCaptureResponse:mapCaptureResponse, renderPlanner:renderPlanner,
     accountBalance:accountBalance, payoffProjection:payoffProjection, payoffPlan:payoffPlan, renderPayback:renderPayback, fillPaybackSelect:fillPaybackSelect,
     periodsUntil:periodsUntil, requiredPayment:requiredPayment, renderPaybackDate:renderPaybackDate, setPaybackMode:setPaybackMode, monthlyClose:monthlyClose,
