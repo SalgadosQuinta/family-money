@@ -1526,6 +1526,9 @@ async function cycleSpace(dom, A){
     assert(patches.length === 1 && patches[0].body.received_at === '2026-07-19' && patches[0].body.received_by === UID, 'PATCH records date and receiver');
     // Bills paid modal has the date field defaulting to today
     assert(d.getElementById('pm-date'), 'paid modal has a date field');
+    // Space isolation: income reloads per space
+    assert(fs.readFileSync(path.join(__dirname,'..','index.html'),'utf8').includes('loadPlanner(), loadIncomeAll(),'), 'income reloads on space switch');
+    assert(fs.readFileSync(path.join(__dirname,'..','index.html'),'utf8').includes('data-kind="income" data-id='), 'income rows can be moved between spaces');
   }
 
   console.log('--- Timeline demarcation ---');

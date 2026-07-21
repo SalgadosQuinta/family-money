@@ -1337,7 +1337,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v37';
+  var APP_BUILD = 'v38';
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
      is down we render the last-known data with a visible banner.
@@ -1518,7 +1518,7 @@ var App = (function(){
     document.querySelectorAll('.fam-only').forEach(function(el){ el.style.display = sp === 'family' ? '' : 'none'; });
   }
   function switchSpaceReload(){
-    return Promise.all([loadBills(), loadPayments(), loadExpenses(), loadPlanner(),
+    return Promise.all([loadBills(), loadPayments(), loadExpenses(), loadPlanner(), loadIncomeAll(),
       loadAccounts(), loadDebts(), loadDebtPayments(), loadBudgets(), loadSnapshots(), loadAssets()])
       .then(function(){ return takeSnapshots(); })
       .then(renderAll)
@@ -1588,10 +1588,18 @@ var App = (function(){
       reqs.push(apiJSON('/rest/v1/fam_planner_items?id=eq.' + id, {method:'PATCH', body:JSON.stringify(body)}));
     } else if(kind === 'account'){
       reqs.push(apiJSON('/rest/v1/fam_accounts?id=eq.' + id, {method:'PATCH', body:JSON.stringify(body)}));
+    } else if(kind === 'income'){
+      reqs.push(apiJSON('/rest/v1/fam_income?id=eq.' + id, {method:'PATCH', body:JSON.stringify(body)}));
+      // future unreceived occurrences of the same series move with it
+      var srcInc = (state.incomeAll||[]).find(function(x){ return x.id === id; });
+      if(srcInc && (srcInc.series_id || (srcInc.recurrence && srcInc.recurrence !== 'none'))){
+        var sid = srcInc.series_id || srcInc.id;
+        reqs.push(apiJSON('/rest/v1/fam_income?or=(series_id.eq.' + sid + ',id.eq.' + sid + ')&received_at=is.null', {method:'PATCH', body:JSON.stringify(body)}).catch(function(){}));
+      }
     }
     return Promise.all(reqs).then(function(){
       toast('Moved to the ' + target + ' space.');
-      return Promise.all([loadBills(), loadPayments(), loadExpenses(), loadPlanner(),
+      return Promise.all([loadBills(), loadPayments(), loadExpenses(), loadPlanner(), loadIncomeAll(),
         loadAccounts(), loadDebts(), loadDebtPayments()]).then(renderAll);
     });
   }
@@ -1731,6 +1739,7 @@ var App = (function(){
           ? '<button class="linkbtn" data-act="unreceive" data-id="' + esc(i.id) + '">Undo received</button>'
           : '<button class="linkbtn" data-act="receive" data-id="' + esc(i.id) + '">Mark received</button>') +
         '<button class="linkbtn" data-act="incedit" data-id="' + esc(i.id) + '">Edit</button>' +
+        '<button class="linkbtn" data-act="movesp" data-kind="income" data-id="' + esc(i.id) + '">\u2192 ' + (currentSpace()==='family'?'Private':'Family') + '</button>' +
       '</div></div>' +
       '<div class="amount' + (st === 'overdue' ? ' overdue' : ' in') + '">' + esc(fmtMoney(i.amount, i.currency)) + '</div></div>';
   }
