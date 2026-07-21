@@ -129,6 +129,7 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
 .wcol.nowweek{border:1px solid var(--brass);border-radius:var(--radius)}
 .card.rolled{border-left:3px solid var(--brass);background:rgba(217,164,56,.06)}
 .card.debtpay{border-left:3px solid var(--purple);opacity:.92}
+.card.debtplan{border-left:3px solid var(--purple)}
 .badge.debt{background:rgba(138,99,184,.2);color:var(--purple)}
 .badge.roll{background:rgba(217,164,56,.18);color:var(--brass)}
 .msep{display:flex;align-items:center;gap:9px;margin:16px 0 4px;font-weight:650;font-size:14px}
@@ -918,6 +919,7 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
     <div id="dp-err" class="small" style="color:var(--red);margin-top:8px;display:none"></div>
     <div class="btnrow">
       <button class="btn ghost" data-close="dpay-modal">Cancel</button>
+      <button class="btn" id="dp-plan" style="display:none">Plan for later</button>
       <button class="btn primary" id="dp-save">Record payment</button>
     </div>
   </div>
@@ -1343,7 +1345,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v39';
+  var APP_BUILD = 'v40';
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
      is down we render the last-known data with a visible banner.
@@ -2112,11 +2114,11 @@ var App = (function(){
         return '<div class="card debtpay">' +
           '<div class="crow"><span class="ctitle">' + esc(p.debt_name) + ' <span class="badge debt">debt payment</span></span>' +
           '<span class="amount">' + esc(fmtMoney(p.amount, p.currency)) + '</span></div>' +
-          '<div class="cactions"><span class="small muted">paid ' + esc(fmtShort(p.paid_at.slice(0,10))) + (p.note ? ' · ' + esc(p.note) : '') + '</span></div></div>';
+          '<div class="cactions"><span class="small muted">paid ' + esc(fmtShort(p.paid_at.slice(0,10))) + (p.note ? ' · ' + esc(p.note) : '') + '</span><button class="linkbtn" data-act="dpundo" data-id="' + esc(p.id) + '">Undo</button></div></div>';
       }).join('');
       var itemCards = state.planItems.filter(function(i){ return i.week_date === w; }).map(function(i){
-        return '<div class="card' + (i.paid ? ' paid' : '') + '" draggable="true" data-kind="item" data-id="' + esc(i.id) + '">' +
-          '<div class="crow"><span class="ctitle">' + esc(i.title) + (i.recurrence && i.recurrence !== 'none' ? ' <span class="badge brass">' + esc(i.recurrence) + '</span>' : '') + (i.on_date ? ' <span class="badge">' + esc(fmtShort(i.on_date)) + '</span>' : '') + '</span>' +
+        return '<div class="card' + (i.paid ? ' paid' : '') + (i.debt_id ? ' debtplan' : '') + '" draggable="true" data-kind="item" data-id="' + esc(i.id) + '">' +
+          '<div class="crow"><span class="ctitle">' + esc(i.title) + (i.debt_id ? ' <span class="badge debt">planned</span>' : '') + (i.recurrence && i.recurrence !== 'none' ? ' <span class="badge brass">' + esc(i.recurrence) + '</span>' : '') + (i.on_date ? ' <span class="badge">' + esc(fmtShort(i.on_date)) + '</span>' : '') + '</span>' +
           '<span class="amount">' + esc(fmtMoney(i.amount, i.currency)) + '</span></div>' +
           '<div class="cactions"><button class="paidtick' + (i.paid ? ' on' : '') + '" data-act="ptick" data-id="' + esc(i.id) + '">' +
           (i.paid ? 'Paid' : 'Mark paid') + '</button></div></div>';
@@ -2953,7 +2955,8 @@ var App = (function(){
     el.innerHTML = rows.map(function(p){
       return '<div class="item"><div><div><strong>' + esc(p.debt_name) + '</strong></div>' +
         '<div class="small muted">' + esc(fmtDate(p.paid_at.slice(0,10))) + ' · ' + esc(memberName(p.paid_by)) +
-        (p.account_id ? ' · from ' + esc(accountName(p.account_id)) : '') + '</div></div>' +
+        (p.account_id ? ' · from ' + esc(accountName(p.account_id)) : '') + '</div>' +
+        '<div class="list-actions"><button class="linkbtn" data-act="dpundo" data-id="' + esc(p.id) + '">Undo</button></div></div>' +
         '<div class="amount">' + esc(fmtMoney(p.amount, p.currency)) + '</div></div>';
     }).join('');
   }
@@ -3059,6 +3062,7 @@ var App = (function(){
     state.payingDebt = d;
     fillAccountSelects();
     $('dp-debt-wrap').style.display = 'none';
+    $('dp-plan').style.display = 'none';
     $('dp-date').value = (weekISO && weekISO < todayISO()) ? weekISO : todayISO();
     $('dp-name').textContent = d.name + ' — balance ' + fmtMoney(d.balance, d.currency);
     $('dp-amount').value = d.min_payment || '';
@@ -3067,6 +3071,27 @@ var App = (function(){
     $('dp-after').textContent = '';
     $('dp-err').style.display = 'none';
     modalOpen('dpay-modal');
+  }
+  function undoDebtPayment(paymentId){
+    var p = state.debtPayments.find(function(x){ return x.id === paymentId; });
+    if(!p) return;
+    askConfirm('Undo debt payment',
+      'Removes the ' + fmtMoney(p.amount, p.currency) + ' payment to ' + p.debt_name + ' and adds it back to the balance.',
+      function(){
+        var debt = state.debts.find(function(d){ return d.id === p.debt_id; });
+        apiJSON('/rest/v1/fam_debt_payments?id=eq.' + p.id, {method:'DELETE'})
+          .then(function(){
+            if(debt){
+              return apiJSON('/rest/v1/fam_debts?id=eq.' + debt.id, {method:'PATCH',
+                body:JSON.stringify({balance: Number(debt.balance) + Number(p.amount), updated_at:new Date().toISOString()})});
+            }
+          })
+          .then(function(){
+            toast('Payment undone — balance restored.');
+            return Promise.all([loadDebts(), loadDebtPayments()]).then(function(){ renderDebts(); renderDebtPayments(); renderNetPosition(); renderPlanner(); });
+          })
+          .catch(function(e){ toast(e.message); });
+      });
   }
   function openDebtPayFromPlanner(weekISO){
     var debts = state.debts.filter(function(d){ return !d.archived && Number(d.balance) > 0; });
@@ -3089,8 +3114,27 @@ var App = (function(){
     applyDebt();
     $('dp-note').value = '';
     $('dp-date').value = (weekISO && weekISO < todayISO()) ? weekISO : todayISO();
+    state.planningDebtWeek = weekISO || currentFriday();
+    $('dp-plan').style.display = '';
     $('dp-err').style.display = 'none';
     modalOpen('dpay-modal');
+  }
+  function planDebtPayment(){
+    var d = state.payingDebt, amount = parseFloat($('dp-amount').value);
+    var errEl = $('dp-err');
+    if(!d){ return; }
+    if(!(amount > 0)){ errEl.textContent = 'Enter a valid amount.'; errEl.style.display=''; return; }
+    var btn = $('dp-plan'); btn.disabled = true;
+    apiJSON('/rest/v1/fam_planner_items', {method:'POST', headers:{'Prefer':'return=minimal'}, body:JSON.stringify(spaceBody({
+      title:'Debt \u00b7 ' + d.name, amount:amount, currency:d.currency,
+      week_date: state.planningDebtWeek, debt_id: d.id, recurrence:'none',
+      account_id:($('dp-account').value || null), note:($('dp-note').value.trim() || null)
+    }))}).then(function(){
+      modalClose('dpay-modal');
+      toast('Planned \u2014 the balance changes only when you tick it paid.');
+      return loadPlanner().then(renderPlanner);
+    }).catch(function(e){ errEl.textContent = e.message; errEl.style.display=''; })
+      .then(function(){ btn.disabled = false; });
   }
   function saveDebtPayment(){
     var d = state.payingDebt, amount = parseFloat($('dp-amount').value);
@@ -3886,6 +3930,7 @@ var App = (function(){
         var act = b.getAttribute('data-act');
         if(act === 'additem'){ openItemModal(null, b.getAttribute('data-week')); return; }
         if(act === 'adddebtpay'){ openDebtPayFromPlanner(b.getAttribute('data-week')); return; }
+        if(act === 'dpundo'){ undoDebtPayment(b.getAttribute('data-id')); return; }
         if(act === 'addinc'){ openIncomeModal(null, b.getAttribute('data-week')); return; }
         if(act === 'ptick'){
           var id = b.getAttribute('data-id');
@@ -3893,8 +3938,29 @@ var App = (function(){
           if(!it) return;
           var patch = it.paid ? {paid:false, paid_by:null, paid_at:null}
             : {paid:true, paid_by:state.session.user.id, paid_at:new Date().toISOString()};
-          apiJSON('/rest/v1/fam_planner_items?id=eq.' + id, {method:'PATCH', body:JSON.stringify(patch)})
+          var debtSideEffect = Promise.resolve();
+          if(it.debt_id){
+            var debt = state.debts.find(function(dd){ return dd.id === it.debt_id; });
+            if(!it.paid){ // ticking paid -> record the real payment
+              debtSideEffect = apiJSON('/rest/v1/fam_debt_payments', {method:'POST', headers:{'Prefer':'return=minimal'}, body:JSON.stringify(spaceBody({
+                debt_id: it.debt_id, debt_name: debt ? debt.name : it.title.replace('Debt \u00b7 ',''), amount: Number(it.amount), currency: it.currency,
+                paid_by: state.session.user.id, account_id: it.account_id || null, note: 'planner:' + it.id
+              }))}).then(function(){
+                if(debt) return apiJSON('/rest/v1/fam_debts?id=eq.' + debt.id, {method:'PATCH',
+                  body:JSON.stringify({balance: Math.max(0, Number(debt.balance) - Number(it.amount)), updated_at:new Date().toISOString()})});
+              });
+            } else { // unticking -> remove the linked payment and restore the balance
+              debtSideEffect = apiJSON('/rest/v1/fam_debt_payments?note=eq.' + encodeURIComponent('planner:' + it.id), {method:'DELETE'})
+                .then(function(){
+                  if(debt) return apiJSON('/rest/v1/fam_debts?id=eq.' + debt.id, {method:'PATCH',
+                    body:JSON.stringify({balance: Number(debt.balance) + Number(it.amount), updated_at:new Date().toISOString()})});
+                });
+            }
+          }
+          debtSideEffect
+            .then(function(){ return apiJSON('/rest/v1/fam_planner_items?id=eq.' + id, {method:'PATCH', body:JSON.stringify(patch)}); })
             .then(function(){
+              if(it.debt_id){ Promise.all([loadDebts(), loadDebtPayments()]).then(function(){ renderDebts(); renderDebtPayments(); renderNetPosition(); }); }
               Object.assign(it, patch);
               if(patch.paid && it.recurrence && it.recurrence !== 'none'){
                 var dayBased = !!it.on_date || it.recurrence === 'daily';
@@ -3969,6 +4035,7 @@ var App = (function(){
     $('dm-asset').addEventListener('change', function(){ $('dm-asset-fields').style.display = this.checked ? '' : 'none'; });
     $('dm-asset-link').addEventListener('change', function(){ $('dm-asset-manual').style.display = this.value ? 'none' : ''; });
     $('dp-save').addEventListener('click', saveDebtPayment);
+    $('dp-plan').addEventListener('click', planDebtPayment);
     $('acct-add-btn').addEventListener('click', function(){ openAcctModal(null); });
     $('am-save').addEventListener('click', saveAcct);
     $('am-archive').addEventListener('click', function(){
@@ -4063,6 +4130,7 @@ var App = (function(){
       else if(act === 'incedit'){ var _inc=(state.incomeAll||[]).find(function(x){ return x.id === id; }); if(_inc) openIncomeModal(_inc); }
       else if(act === 'asedit'){ openAssetModal(state.assets.find(function(x){ return x.id === id; })); }
       else if(act === 'dpay'){ openDebtPayModal(state.debts.find(function(x){ return x.id === id; })); }
+      else if(act === 'dpundo'){ undoDebtPayment(id); }
       else if(act === 'dedit'){ openDebtModal(state.debts.find(function(x){ return x.id === id; })); }
       else if(act === 'ddel'){
         askConfirm('Delete debt', 'This removes the debt (payment history is kept).', function(){

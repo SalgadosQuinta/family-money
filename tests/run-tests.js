@@ -81,6 +81,12 @@ function mockFetch(url, opts){
   if(url.includes('/rest/v1/fam_debt_payments')){
     if(method==='GET') return j(DB.debtPayments||[]);
     if(method==='POST'){ DB.debtPayments=DB.debtPayments||[]; DB.debtPayments.unshift(Object.assign({id:'dp'+(DB.debtPayments.length+1), paid_at:new Date().toISOString()}, JSON.parse(opts.body))); return j(null,201); }
+    if(method==='DELETE'){
+      const mid=/[?&]id=eq\.([^&]+)/.exec(url); const mnote=/[?&]note=eq\.([^&]+)/.exec(url);
+      if(mid) DB.debtPayments=(DB.debtPayments||[]).filter(x=>x.id!==mid[1]);
+      if(mnote) DB.debtPayments=(DB.debtPayments||[]).filter(x=>x.note!==decodeURIComponent(mnote[1]));
+      return j(null,204);
+    }
   }
   if(url.includes('/rest/v1/fam_debts')){
     if(method==='GET') return j((DB.debts||[]).filter(d=>!d.archived));
@@ -376,6 +382,33 @@ async function cycleSpace(dom, A){
     assert(parseFloat(DB.debts[0].balance) === 8000, 'balance reduced by the partial payment');
     const boardNow = d.getElementById('pl-board').innerHTML;
     assert(boardNow.includes('debt payment') && boardNow.includes('Tafadzwa'), 'debt payment card on the board');
+
+    // Undo the recorded payment: balance restored, card gone
+    const undoBtn = d.querySelector('button[data-act="dpundo"]');
+    assert(undoBtn, 'debt payment card offers Undo');
+    undoBtn.click(); await wait(60);
+    d.getElementById('cm-yes').click(); await wait(200);
+    assert(DB.debtPayments.length === 0, 'payment deleted on undo');
+    assert(parseFloat(DB.debts[0].balance) === 8500, 'balance restored on undo');
+
+    // Plan for later: creates a linked planner item, no payment, no balance change
+    d.querySelector('button[data-act="adddebtpay"]').click(); await wait(60);
+    d.getElementById('dp-amount').value = '300';
+    d.getElementById('dp-plan').click(); await wait(150);
+    assert(DB.debtPayments.length === 0, 'planning records no payment');
+    assert(parseFloat(DB.debts[0].balance) === 8500, 'planning leaves balance untouched');
+    const planned = DB.planner.find(x=>x.debt_id === 'dbt1');
+    assert(planned && parseFloat(planned.amount) === 300, 'planned item linked to the debt');
+    assert(d.getElementById('pl-board').innerHTML.includes('planned'), 'planned badge on the board');
+
+    // Tick paid -> real payment + balance reduced; untick -> reversed
+    d.querySelector('button[data-act="ptick"][data-id="'+planned.id+'"]').click(); await wait(200);
+    assert(DB.debtPayments.length === 1 && parseFloat(DB.debts[0].balance) === 8200, 'tick records payment and reduces balance');
+    assert(DB.debtPayments[0].note === 'planner:'+planned.id, 'payment linked back to the planned item');
+    d.querySelector('button[data-act="ptick"][data-id="'+planned.id+'"]').click(); await wait(200);
+    assert(DB.debtPayments.length === 0 && parseFloat(DB.debts[0].balance) === 8500, 'untick removes payment and restores balance');
+    DB.planner = DB.planner.filter(x=>!x.debt_id);
+    await A.boot(); await wait(80);
 
     // week nav: forward one week, back two (into the past), then label-click resets
     const before = d.getElementById('pl-month').textContent;
