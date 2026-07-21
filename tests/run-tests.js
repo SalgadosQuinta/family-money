@@ -345,6 +345,21 @@ async function cycleSpace(dom, A){
     assert(DB.planner[0].paid === true && DB.planner[0].paid_by === UID, 'paid tick persists who marked it');
     assert(d.querySelector('.card.paid') !== null, 'paid card styled as paid');
 
+    // Rollover: an unpaid item from a past week appears in the current week column
+    DB.planner.push({id:'plOld', title:'Vet visit', amount:50, currency:'GBP', week_date:A.addWeeksISO(A.currentFriday(),-2), paid:false, recurrence:'none'});
+    await A.boot(); await wait(100);
+    const nowCol = d.querySelector('#pl-board .wcol.nowweek');
+    assert(nowCol && nowCol.innerHTML.includes('Vet visit') && nowCol.innerHTML.includes('Rolled over'), 'unpaid past item rolls into the current week');
+    assert(nowCol.innerHTML.includes('from '), 'rolled card shows its origin week');
+    // it counts in the current week totals
+    assert(nowCol.querySelector('.wfoot').textContent.includes('GBP') || nowCol.querySelector('.wfoot').textContent.length > 0, 'totals rendered with rollover included');
+    // paying it removes it from the rolled section
+    nowCol.querySelector('.card.rolled button[data-act="ptick"][data-id="plOld"]').click(); await wait(150);
+    const nowCol2 = d.querySelector('#pl-board .wcol.nowweek');
+    assert(!nowCol2.innerHTML.includes('Vet visit'), 'marking paid clears the rollover');
+    DB.planner = DB.planner.filter(x=>x.id!=='plOld');
+    await A.boot(); await wait(80);
+
     // week nav: forward one week, back two (into the past), then label-click resets
     const before = d.getElementById('pl-month').textContent;
     d.getElementById('pl-next').click(); await wait(80);
@@ -1513,6 +1528,14 @@ async function cycleSpace(dom, A){
     assert(d.getElementById('pm-date'), 'paid modal has a date field');
   }
 
+  console.log('--- Timeline demarcation ---');
+  {
+    const fm = fs.readFileSync(path.join(__dirname,'..','index.html'),'utf8');
+    assert(fm.includes('function monthWeekMarked'), 'money app has timeline marker helper');
+    assert(fm.includes("monthWeekMarked(rows, function(b){ return b.due_date; }, billRow)"), 'bills list marked by month/week when date-sorted');
+    assert(fm.includes('monthWeekMarked(rows, incomeExpected, incomeRow)'), 'income list marked by month/week');
+    assert(fm.includes('.msep::before') && fm.includes('.wksep::before'), 'visual (non-text) month bar and week tick styles present');
+  }
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

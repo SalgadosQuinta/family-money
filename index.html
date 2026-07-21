@@ -127,6 +127,14 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
 .card .amount{font-size:12.5px}
 .card.income{border-left:3px solid var(--green)}
 .wcol.nowweek{border:1px solid var(--brass);border-radius:var(--radius)}
+.card.rolled{border-left:3px solid var(--brass);background:rgba(217,164,56,.06)}
+.badge.roll{background:rgba(217,164,56,.18);color:var(--brass)}
+.msep{display:flex;align-items:center;gap:9px;margin:16px 0 4px;font-weight:650;font-size:14px}
+.msep::before{content:'';width:4px;height:18px;background:var(--brass);border-radius:2px}
+.msep::after{content:'';flex:1;height:1px;background:var(--line)}
+.wksep{display:flex;align-items:center;gap:7px;margin:7px 0 2px;font-family:var(--mono,monospace);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.wksep::before{content:'';width:14px;height:3px;background:var(--line);border-radius:2px}
+.wksep::after{content:'';flex:1;height:1px;background:var(--line);opacity:.5}
 .card.bill-card{border-left:3px solid var(--brass-dim)}
 .card.paid{opacity:.55}
 .card.paid .ctitle{text-decoration:line-through}
@@ -1329,7 +1337,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v36';
+  var APP_BUILD = 'v37';
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
      is down we render the last-known data with a visible banner.
@@ -1736,7 +1744,9 @@ var App = (function(){
       if(sort === 'status') return incomeStatus(a).localeCompare(incomeStatus(b));
       return String(incomeExpected(a) || '9999').localeCompare(String(incomeExpected(b) || '9999'));
     });
-    el.innerHTML = rows.length ? rows.map(incomeRow).join('') : '<div class="empty">Nothing outstanding — all expected income received.</div>';
+    el.innerHTML = rows.length
+      ? (sort === 'expected' ? monthWeekMarked(rows, incomeExpected, incomeRow) : rows.map(incomeRow).join(''))
+      : '<div class="empty">Nothing outstanding — all expected income received.</div>';
     var rl = $('income-received-list'); if(!rl) return;
     var rec = (state.incomeAll || []).filter(function(i){ return i.received_at; })
       .sort(function(a,b){ return String(b.received_at).localeCompare(String(a.received_at)); }).slice(0, 25);
@@ -1887,6 +1897,27 @@ var App = (function(){
     });
   }
 
+  function monthWeekMarked(rows, dateFn, rowFn){
+    // Visual timeline: a brass month band at each month change, a tick line at
+    // each week change. Rows must arrive sorted by dateFn ascending.
+    var html = '', lastMonth = null, lastWeek = null;
+    rows.forEach(function(r){
+      var d = dateFn(r);
+      if(d){
+        var mo = d.slice(0,7), wk = fridayOf(d);
+        if(mo !== lastMonth){
+          html += '<div class="msep"><span>' + esc(new Date(d + 'T12:00:00').toLocaleDateString('en-GB', {month:'long', year:'numeric'})) + '</span></div>';
+          lastMonth = mo; lastWeek = null;
+        }
+        if(wk !== lastWeek){
+          html += '<div class="wksep"><span>wk ending ' + esc(fmtShort(wk)) + '</span></div>';
+          lastWeek = wk;
+        }
+      }
+      html += rowFn(r);
+    });
+    return html;
+  }
   function billRow(b){
     var du = daysUntil(b.due_date);
     var when = du < 0 ? (Math.abs(du) + 'd overdue') : du === 0 ? 'Due today' : ('Due in ' + du + 'd');
@@ -1917,7 +1948,10 @@ var App = (function(){
   function renderBills(){
     var el = $('bills-list');
     if(!state.bills.length){ el.innerHTML = '<div class="empty">No bills yet. Add the first one.</div>'; return; }
-    el.innerHTML = sortRows(state.bills, state.sortBills).map(billRow).join('');
+    var rows = sortRows(state.bills, state.sortBills);
+    el.innerHTML = (state.sortBills || 'due_date') === 'due_date'
+      ? monthWeekMarked(rows, function(b){ return b.due_date; }, billRow)
+      : rows.map(billRow).join('');
   }
 
   function renderPayments(){
@@ -2065,11 +2099,36 @@ var App = (function(){
           (i.paid ? 'Paid' : 'Mark paid') + '</button></div></div>';
       }).join('');
       var isNow = w === currentFriday();
+      var rolledCards = '';
+      if(isNow){
+        var cf = currentFriday();
+        var rolledItems = state.planItems.filter(function(i){ return !i.paid && i.week_date && i.week_date < cf; });
+        var rolledBills = state.bills.filter(function(b){ return !b.archived && fridayOf(b.due_date) < cf; });
+        rolledCards = (rolledItems.length || rolledBills.length)
+          ? '<div class="wsec" style="color:var(--brass)">Rolled over — unpaid</div>' +
+            rolledBills.map(function(b){
+              t.out[b.currency] = (t.out[b.currency]||0) + Number(b.amount);
+              t.rem[b.currency] = (t.rem[b.currency]||0) - Number(b.amount);
+              return '<div class="card bill-card rolled" draggable="true" data-kind="bill" data-id="' + esc(b.id) + '">' +
+                '<div class="crow"><span class="ctitle">' + esc(b.name) + ' <span class="badge roll">from ' + esc(fmtShort(fridayOf(b.due_date))) + '</span></span>' +
+                '<span class="amount overdue">' + esc(fmtMoney(b.amount, b.currency)) + '</span></div>' +
+                '<div class="cactions"><span class="small muted">bill · was due ' + esc(fmtShort(b.due_date)) + '</span></div></div>';
+            }).join('') +
+            rolledItems.map(function(i){
+              t.out[i.currency] = (t.out[i.currency]||0) + Number(i.amount);
+              t.rem[i.currency] = (t.rem[i.currency]||0) - Number(i.amount);
+              return '<div class="card rolled" draggable="true" data-kind="item" data-id="' + esc(i.id) + '">' +
+                '<div class="crow"><span class="ctitle">' + esc(i.title) + ' <span class="badge roll">from ' + esc(fmtShort(i.week_date)) + '</span></span>' +
+                '<span class="amount overdue">' + esc(fmtMoney(i.amount, i.currency)) + '</span></div>' +
+                '<div class="cactions"><button class="paidtick" data-act="ptick" data-id="' + esc(i.id) + '">Mark paid</button></div></div>';
+            }).join('')
+          : '';
+      }
       return '<div class="wcol' + (isNow ? ' nowweek' : '') + '" data-week="' + esc(w) + '">' +
         '<div class="whead"><span>' + esc(fmtShort(w)) + (isNow ? ' <span class="badge brass">this week</span>' : '') + '</span><span class="muted small">wk</span></div>' +
         '<div class="wsec">Money in</div>' + (incCards || '') +
         '<button class="addmini" data-act="addinc" data-week="' + esc(w) + '">+ income</button>' +
-        '<div class="wsec">Out</div>' + (billCards + itemCards || '') +
+        '<div class="wsec">Out</div>' + rolledCards + (billCards + itemCards || '') +
         '<button class="addmini" data-act="additem" data-week="' + esc(w) + '">+ item</button>' +
         '<div class="wfoot">' +
           '<div class="frow"><span class="muted">In</span><span>' + moneyList(t.inc) + '</span></div>' +
