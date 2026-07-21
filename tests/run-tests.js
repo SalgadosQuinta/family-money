@@ -360,6 +360,23 @@ async function cycleSpace(dom, A){
     DB.planner = DB.planner.filter(x=>x.id!=='plOld');
     await A.boot(); await wait(80);
 
+    // + debt payment from the planner: partial amount, dated to the week, reduces the balance
+    DB.debts = [{id:'dbt1', name:'Tafadzwa', balance:8500, currency:'GBP', min_payment:0, archived:false}];
+    DB.debtPayments = [];
+    await A.boot(); await wait(100);
+    const wkBtn = d.querySelector('button[data-act="adddebtpay"]');
+    assert(wkBtn, 'planner weeks offer + debt payment');
+    wkBtn.click(); await wait(60);
+    assert(d.getElementById('dp-debt-wrap').style.display !== 'none', 'debt selector shown from planner');
+    assert(d.getElementById('dp-name').textContent.includes('partial payments welcome'), 'partial payments invited');
+    d.getElementById('dp-amount').value = '500';
+    d.getElementById('dp-save').click(); await wait(150);
+    assert(DB.debtPayments.length === 1 && parseFloat(DB.debtPayments[0].amount) === 500, 'partial payment recorded');
+    assert(DB.debtPayments[0].paid_at && DB.debtPayments[0].paid_at.startsWith(wkBtn.getAttribute('data-week')) || DB.debtPayments[0].paid_at.startsWith(A.todayISO()), 'payment dated to the chosen week');
+    assert(parseFloat(DB.debts[0].balance) === 8000, 'balance reduced by the partial payment');
+    const boardNow = d.getElementById('pl-board').innerHTML;
+    assert(boardNow.includes('debt payment') && boardNow.includes('Tafadzwa'), 'debt payment card on the board');
+
     // week nav: forward one week, back two (into the past), then label-click resets
     const before = d.getElementById('pl-month').textContent;
     d.getElementById('pl-next').click(); await wait(80);
