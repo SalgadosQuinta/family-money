@@ -980,6 +980,15 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
 </div>
 
 <!-- Confirm modal -->
+<div class="modal-wrap" id="dstmt-modal">
+  <div class="modal" style="max-width:560px">
+    <h3 id="ds-title">Debt statement</h3>
+    <p class="small muted" id="ds-sub" style="margin-top:0"></p>
+    <div id="ds-chips" style="display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 10px"></div>
+    <div id="ds-list" style="max-height:46vh;overflow:auto"></div>
+    <div class="btnrow"><button class="btn" data-close="dstmt-modal">Close</button></div>
+  </div>
+</div>
 <div class="modal-wrap" id="confirm-modal">
   <div class="modal">
     <h3 id="cm-title">Are you sure?</h3>
@@ -1345,7 +1354,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v41';
+  var APP_BUILD = 'v42';
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
      is down we render the last-known data with a visible banner.
@@ -2806,7 +2815,7 @@ var App = (function(){
       var eq = debtEquity(d);
       var ai = debtAssetInfo(d);
       return '<div class="item"><div>' +
-        '<div><strong>' + esc(d.name) + '</strong><span class="badge">' + esc(typeLabel) + '</span>' +
+        '<div><strong><button class="linkbtn" data-act="dstmt" data-id="' + esc(d.id) + '" style="font-weight:700;font-size:inherit;color:inherit;padding:0">' + esc(d.name) + '</button></strong><span class="badge">' + esc(typeLabel) + '</span>' +
           (d.asset_backed ? '<span class="badge" style="border-color:var(--green);color:var(--green)">Asset</span>' : '') +
           (proj === null && Number(d.min_payment) > 0 && Number(d.balance) > 0 ? '<span class="badge red">Growing</span>' : '') + '</div>' +
         '<div class="small muted">' + esc(d.owner_name) + (d.lender ? ' · ' + esc(d.lender) : '') +
@@ -2815,6 +2824,7 @@ var App = (function(){
         '<div class="small muted">' + esc(projTxt) + '</div>' +
         (eq ? '<div class="small" style="color:var(--green)">' + esc(eq.name) + (ai && ai.linked ? ' (register)' : '') + ' equity: ' + esc(fmtMoney(eq.equity, eq.currency)) + ' of ' + esc(fmtMoney(eq.value, eq.currency)) + '</div>' : (ai && ai.value != null ? '<div class="small muted">' + esc(ai.name) + ' valued ' + esc(fmtMoney(ai.value, ai.currency)) + ' (different currency to the debt)</div>' : '')) +
         '<div class="list-actions">' +
+          '<button class="linkbtn" data-act="dstmt" data-id="' + esc(d.id) + '">Statement</button>' +
           '<button class="linkbtn" data-act="dpay" data-id="' + esc(d.id) + '">Record payment</button>' +
           '<button class="linkbtn" data-act="dedit" data-id="' + esc(d.id) + '">Edit</button>' +
           '<button class="linkbtn" data-act="movesp" data-kind="debt" data-id="' + esc(d.id) + '">→ ' + (currentSpace()==='family'?'Private':'Family') + '</button>' +
@@ -3072,6 +3082,62 @@ var App = (function(){
     $('dp-err').style.display = 'none';
     modalOpen('dpay-modal');
   }
+  function openDebtStatement(d){
+    state.statementDebt = d;
+    renderDebtStatement();
+    modalOpen('dstmt-modal');
+  }
+  function renderDebtStatement(){
+    var d = state.debts.find(function(x){ return x.id === (state.statementDebt && state.statementDebt.id); }) || state.statementDebt;
+    if(!d) return;
+    var pays = state.debtPayments.filter(function(p){ return p.debt_id === d.id; })
+      .slice().sort(function(a,b){ return String(a.paid_at).localeCompare(String(b.paid_at)); });
+    var opened = (d.created_at || '').slice(0,10);
+    var totalPaid = pays.reduce(function(a,p){ return a + Number(p.amount); }, 0);
+    var principal = Number(d.principal) || (Number(d.balance) + totalPaid);
+    var progress = principal > 0 ? Math.max(0, Math.min(100, Math.round(100 * (1 - Number(d.balance)/principal)))) : 0;
+    var adjust = Number(d.balance) - (principal - totalPaid); // manual balance edits outside payments
+    $('ds-title').textContent = d.name + ' — statement';
+    $('ds-sub').textContent = (d.lender ? d.lender + ' · ' : '') + d.owner_name +
+      (Number(d.interest_rate) ? ' · ' + d.interest_rate + '% APR' : '') +
+      (opened ? ' · opened ' + fmtDate(opened) : '');
+    var chip = function(label, val, col){ return '<span class="badge" style="font-size:12px;padding:5px 10px' + (col ? ';border-color:' + col + ';color:' + col : '') + '">' + esc(label) + ' ' + esc(val) + '</span>'; };
+    $('ds-chips').innerHTML =
+      chip('Balance', fmtMoney(d.balance, d.currency), Number(d.balance) > 0 ? 'var(--red)' : 'var(--green)') +
+      chip('Opening', fmtMoney(principal, d.currency)) +
+      chip('Paid', fmtMoney(totalPaid, d.currency), 'var(--green)') +
+      chip('Payments', String(pays.length)) +
+      chip('Progress', progress + '%') +
+      (pays.length ? chip('Last paid', fmtDate(pays[pays.length-1].paid_at.slice(0,10))) : chip('Last paid', 'never'));
+    var running = principal;
+    var rows = [{kind:'open', date:opened || (pays[0] ? pays[0].paid_at.slice(0,10) : todayISO()), bal:principal}];
+    pays.forEach(function(p){ running = running - Number(p.amount); rows.push({kind:'pay', p:p, date:p.paid_at.slice(0,10), bal:running}); });
+    var rowFn = function(r){
+      if(r.kind === 'open'){
+        return '<div class="item"><div><div><strong>Debt opened</strong></div>' +
+          '<div class="small muted">' + esc(fmtDate(r.date)) + '</div></div>' +
+          '<div class="amount">' + esc(fmtMoney(r.bal, d.currency)) + '</div></div>';
+      }
+      var p = r.p, open_ = state.dsOpenRow === p.id;
+      return '<div class="item" style="flex-wrap:wrap"><div>' +
+        '<div><button class="linkbtn" data-act="dsrow" data-id="' + esc(p.id) + '" style="font-weight:600">' + esc(fmtDate(r.date)) + '</button>' +
+        (p.note && p.note.indexOf('planner:') === 0 ? ' <span class="badge debt">from planner</span>' : '') + '</div>' +
+        '<div class="small muted">payment · balance after ' + esc(fmtMoney(r.bal, d.currency)) + '</div>' +
+        (open_ ? '<div class="small" style="margin-top:6px;padding:8px 10px;border:1px solid var(--line);border-radius:8px">' +
+          'Paid by ' + esc(memberName(p.paid_by)) +
+          (p.account_id ? ' · from ' + esc(accountName(p.account_id)) : '') +
+          (p.note && p.note.indexOf('planner:') !== 0 ? ' · note: ' + esc(p.note) : '') +
+          ' · recorded ' + esc(fmtDate(p.paid_at.slice(0,10))) +
+          ' <button class="linkbtn red" data-act="dpundo" data-id="' + esc(p.id) + '" style="margin-left:8px">Undo</button></div>' : '') +
+        '</div><div class="amount" style="color:var(--green)">\u2212' + esc(fmtMoney(p.amount, p.currency)) + '</div></div>';
+    };
+    var listHTML = monthWeekMarked(rows, function(r){ return r.date; }, rowFn);
+    if(Math.abs(adjust) > 0.005){
+      listHTML += '<div class="small muted" style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--line)">Balance adjustments made outside payments: ' +
+        esc((adjust > 0 ? '+' : '\u2212') + fmtMoney(Math.abs(adjust), d.currency)) + ' (edits to the debt record).</div>';
+    }
+    $('ds-list').innerHTML = pays.length ? listHTML : listHTML + '<div class="empty">No payments recorded yet.</div>';
+  }
   function undoDebtPayment(paymentId){
     var p = state.debtPayments.find(function(x){ return x.id === paymentId; });
     if(!p) return;
@@ -3088,7 +3154,7 @@ var App = (function(){
           })
           .then(function(){
             toast('Payment undone — balance restored.');
-            return Promise.all([loadDebts(), loadDebtPayments()]).then(function(){ renderDebts(); renderDebtPayments(); renderNetPosition(); renderPlanner(); });
+            return Promise.all([loadDebts(), loadDebtPayments()]).then(function(){ renderDebts(); renderDebtPayments(); renderNetPosition(); renderPlanner(); if(document.getElementById('dstmt-modal').classList.contains('open')) renderDebtStatement(); });
           })
           .catch(function(e){ toast(e.message); });
       });
@@ -4037,6 +4103,12 @@ var App = (function(){
     $('dm-asset-link').addEventListener('change', function(){ $('dm-asset-manual').style.display = this.value ? 'none' : ''; });
     $('dp-save').addEventListener('click', saveDebtPayment);
     $('dp-plan').addEventListener('click', planDebtPayment);
+    $('dstmt-modal').addEventListener('click', function(e){
+      var b = e.target.closest('[data-act]'); if(!b) return;
+      var act = b.getAttribute('data-act'), id = b.getAttribute('data-id');
+      if(act === 'dsrow'){ state.dsOpenRow = state.dsOpenRow === id ? null : id; renderDebtStatement(); }
+      else if(act === 'dpundo'){ undoDebtPayment(id); }
+    });
     $('acct-add-btn').addEventListener('click', function(){ openAcctModal(null); });
     $('am-save').addEventListener('click', saveAcct);
     $('am-archive').addEventListener('click', function(){
@@ -4132,6 +4204,8 @@ var App = (function(){
       else if(act === 'asedit'){ openAssetModal(state.assets.find(function(x){ return x.id === id; })); }
       else if(act === 'dpay'){ openDebtPayModal(state.debts.find(function(x){ return x.id === id; })); }
       else if(act === 'dpundo'){ undoDebtPayment(id); }
+      else if(act === 'dstmt'){ openDebtStatement(state.debts.find(function(x){ return x.id === id; })); }
+      else if(act === 'dsrow'){ state.dsOpenRow = state.dsOpenRow === id ? null : id; renderDebtStatement(); }
       else if(act === 'dedit'){ openDebtModal(state.debts.find(function(x){ return x.id === id; })); }
       else if(act === 'ddel'){
         askConfirm('Delete debt', 'This removes the debt (payment history is kept).', function(){

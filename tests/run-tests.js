@@ -413,6 +413,29 @@ async function cycleSpace(dom, A){
     DB.planner = DB.planner.filter(x=>!x.debt_id);
     await A.boot(); await wait(80);
 
+    // Debt statement: open from the Debts tab, running balance, clickable date detail
+    DB.debts = [{id:'dbt1', name:'Tafadzwa', balance:7800, principal:8500, currency:'GBP', min_payment:0, archived:false, owner_name:'Rodney', created_at:'2026-06-01T10:00:00Z'}];
+    DB.debtPayments = [
+      {id:'dpA', debt_id:'dbt1', debt_name:'Tafadzwa', amount:500, currency:'GBP', paid_at:'2026-06-20T12:00:00Z', paid_by:UID},
+      {id:'dpB', debt_id:'dbt1', debt_name:'Tafadzwa', amount:200, currency:'GBP', paid_at:'2026-07-05T12:00:00Z', paid_by:UID, note:'planner:xyz'}
+    ];
+    await A.boot(); await wait(100);
+    d.querySelector('#tabs button[data-view="debts"]').click(); await wait(60);
+    d.querySelector('button[data-act="dstmt"]').click(); await wait(80);
+    const ds = d.getElementById('ds-list').innerHTML;
+    assert(d.getElementById('ds-title').textContent.includes('Tafadzwa'), 'statement opens for the chosen debt');
+    assert(d.getElementById('ds-chips').textContent.includes('8,500') || d.getElementById('ds-chips').textContent.includes('8500'), 'opening principal shown');
+    assert(ds.includes('Debt opened'), 'statement starts at when it was put in');
+    assert(ds.includes('balance after') && ds.includes('8,000') || ds.includes('8000'), 'running balance after first payment');
+    assert(ds.includes('from planner'), 'planner-sourced payment badged');
+    assert(d.getElementById('ds-chips').textContent.includes('Last paid'), 'last payment date summarised');
+    // click a date -> detail expands with payer and Undo
+    d.querySelector('#ds-list button[data-act="dsrow"]').click(); await wait(60);
+    const dsOpen = d.getElementById('ds-list').innerHTML;
+    assert(dsOpen.includes('Paid by') && dsOpen.includes('Undo'), 'date click reveals payment detail with undo');
+    DB.debts=[{id:'dbt1', name:'Tafadzwa', balance:8500, currency:'GBP', min_payment:0, archived:false}]; DB.debtPayments=[];
+    d.querySelector('#dstmt-modal [data-close]').click(); await A.boot(); await wait(80);
+
     // week nav: forward one week, back two (into the past), then label-click resets
     const before = d.getElementById('pl-month').textContent;
     d.getElementById('pl-next').click(); await wait(80);
