@@ -429,6 +429,12 @@ async function cycleSpace(dom, A){
     assert(ds.includes('balance after') && ds.includes('8,000') || ds.includes('8000'), 'running balance after first payment');
     assert(ds.includes('from planner'), 'planner-sourced payment badged');
     assert(d.getElementById('ds-chips').textContent.includes('Last paid'), 'last payment date summarised');
+    // Record actions live on the statement itself
+    assert(d.getElementById('ds-pay') && d.getElementById('ds-borrow'), 'statement offers Record payment and Borrowed more');
+    d.getElementById('ds-borrow').click(); await wait(60);
+    assert(d.getElementById('dp-save').textContent === 'Record borrowing', 'Borrowed more preset carries into the dialog');
+    d.querySelector('#dpay-modal [data-close]').click(); await wait(40);
+    d.querySelector('button[data-act="dstmt"]').click(); await wait(60);
     // click a date -> detail expands with payer and Undo
     d.querySelector('#ds-list button[data-act="dsrow"]').click(); await wait(60);
     const dsOpen = d.getElementById('ds-list').innerHTML;

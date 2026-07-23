@@ -990,7 +990,13 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
     <p class="small muted" id="ds-sub" style="margin-top:0"></p>
     <div id="ds-chips" style="display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 10px"></div>
     <div id="ds-list" style="max-height:46vh;overflow:auto"></div>
-    <div class="btnrow"><button class="btn" data-close="dstmt-modal">Close</button></div>
+    <div class="btnrow" style="justify-content:space-between">
+      <span style="display:flex;gap:8px">
+        <button class="btn primary" id="ds-pay">Record payment</button>
+        <button class="btn" id="ds-borrow">Borrowed more</button>
+      </span>
+      <button class="btn ghost" data-close="dstmt-modal">Close</button>
+    </div>
   </div>
 </div>
 <div class="modal-wrap" id="confirm-modal">
@@ -1358,7 +1364,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v43';
+  var APP_BUILD = 'v44';
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
      is down we render the last-known data with a visible banner.
@@ -3072,14 +3078,15 @@ var App = (function(){
      .catch(function(e){ errEl.textContent = e.message; errEl.style.display=''; });
   }
 
-  function openDebtPayModal(d, weekISO){
+  function openDebtPayModal(d, weekISO, presetKind){
     state.payingDebt = d;
     fillAccountSelects();
     $('dp-debt-wrap').style.display = 'none';
     $('dp-plan').style.display = 'none';
-    state.dpKind = 'payment';
-    $('dp-kind-pay').classList.add('primary'); $('dp-kind-borrow').classList.remove('primary');
-    $('dp-save').textContent = 'Record payment';
+    state.dpKind = presetKind || 'payment';
+    var isB = state.dpKind === 'borrow';
+    $('dp-kind-pay').classList.toggle('primary', !isB); $('dp-kind-borrow').classList.toggle('primary', isB);
+    $('dp-save').textContent = isB ? 'Record borrowing' : 'Record payment';
     $('dp-date').value = (weekISO && weekISO < todayISO()) ? weekISO : todayISO();
     $('dp-name').textContent = d.name + ' — balance ' + fmtMoney(d.balance, d.currency);
     $('dp-amount').value = d.min_payment || '';
@@ -3241,7 +3248,7 @@ var App = (function(){
     }).then(function(){
       modalClose('dpay-modal');
       toast(kind === 'borrow' ? 'Borrowing recorded. New balance ' + fmtMoney(newBal, d.currency) + '.' : (newBal === 0 ? 'Debt cleared — well done.' : 'Payment recorded. New balance ' + fmtMoney(newBal, d.currency) + '.'));
-      return Promise.all([loadDebts(), loadDebtPayments()]).then(function(){ renderDebts(); renderDebtPayments(); renderNetPosition(); renderPlanner(); });
+      return Promise.all([loadDebts(), loadDebtPayments()]).then(function(){ renderDebts(); renderDebtPayments(); renderNetPosition(); renderPlanner(); if(document.getElementById('dstmt-modal').classList.contains('open')) renderDebtStatement(); });
     }).catch(function(e){ errEl.textContent = e.message; errEl.style.display=''; })
       .then(function(){ btn.disabled = false; });
   }
@@ -4133,6 +4140,8 @@ var App = (function(){
     };
     $('dp-kind-pay').addEventListener('click', function(){ setDpKind('payment'); });
     $('dp-kind-borrow').addEventListener('click', function(){ setDpKind('borrow'); });
+    $('ds-pay').addEventListener('click', function(){ if(state.statementDebt) openDebtPayModal(state.debts.find(function(x){ return x.id === state.statementDebt.id; }) || state.statementDebt, null, 'payment'); });
+    $('ds-borrow').addEventListener('click', function(){ if(state.statementDebt) openDebtPayModal(state.debts.find(function(x){ return x.id === state.statementDebt.id; }) || state.statementDebt, null, 'borrow'); });
     $('dstmt-modal').addEventListener('click', function(e){
       var b = e.target.closest('[data-act]'); if(!b) return;
       var act = b.getAttribute('data-act'), id = b.getAttribute('data-id');
