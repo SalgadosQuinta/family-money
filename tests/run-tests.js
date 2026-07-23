@@ -435,6 +435,8 @@ async function cycleSpace(dom, A){
     assert(d.getElementById('dp-save').textContent === 'Record borrowing', 'Borrowed more preset carries into the dialog');
     d.querySelector('#dpay-modal [data-close]').click(); await wait(40);
     d.querySelector('button[data-act="dstmt"]').click(); await wait(60);
+    // Undo is visible on every statement row without expanding
+    assert(d.querySelectorAll('#ds-list button[data-act="dpundo"]').length >= 2, 'each entry shows a direct Undo');
     // click a date -> detail expands with payer and Undo
     d.querySelector('#ds-list button[data-act="dsrow"]').click(); await wait(60);
     const dsOpen = d.getElementById('ds-list').innerHTML;
