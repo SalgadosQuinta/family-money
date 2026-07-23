@@ -433,8 +433,34 @@ async function cycleSpace(dom, A){
     d.querySelector('#ds-list button[data-act="dsrow"]').click(); await wait(60);
     const dsOpen = d.getElementById('ds-list').innerHTML;
     assert(dsOpen.includes('Paid by') && dsOpen.includes('Undo'), 'date click reveals payment detail with undo');
+    d.querySelector('#dstmt-modal [data-close]').click(); await wait(40);
+
+    // Borrowed more: recorded with a historical date, balance rises, statement shows it
+    d.querySelector('button[data-act="dpay"]').click(); await wait(60);
+    d.getElementById('dp-kind-borrow').click(); await wait(30);
+    assert(d.getElementById('dp-save').textContent === 'Record borrowing', 'save button reflects borrowing mode');
+    d.getElementById('dp-amount').value = '1000';
+    d.getElementById('dp-date').value = '2026-06-25'; // retroactive
+    d.getElementById('dp-save').click(); await wait(180);
+    const bor = DB.debtPayments.find(x=>x.kind==='borrow');
+    assert(bor && parseFloat(bor.amount) === 1000, 'borrowing recorded with kind=borrow');
+    assert(bor.paid_at.startsWith('2026-06-25'), 'borrowing takes the historical date');
+    assert(parseFloat(DB.debts[0].balance) === 8800, 'balance increased by the borrowing');
+    d.querySelector('button[data-act="dstmt"]').click(); await wait(80);
+    const ds2 = d.getElementById('ds-list').innerHTML;
+    assert(ds2.includes('borrowed more') && ds2.includes('+') , 'statement shows the Borrowed more entry');
+    assert(d.getElementById('ds-chips').textContent.includes('Borrowed more'), 'chips summarise total borrowed');
+    // retroactive PAYMENT also honoured (already dated 2026-06-20/07-05 rows render in month bands)
+    assert(ds2.indexOf('June') < ds2.indexOf('July'), 'historical entries fall under their own month bands in order');
+    // Undo the borrowing: balance comes back down
+    d.querySelector('#ds-list button[data-act="dsrow"][data-id="'+bor.id+'"]').click(); await wait(60);
+    d.querySelector('#ds-list button[data-act="dpundo"][data-id="'+bor.id+'"]').click(); await wait(60);
+    d.getElementById('cm-yes').click(); await wait(200);
+    assert(!DB.debtPayments.find(x=>x.kind==='borrow'), 'borrowing removed on undo');
+    assert(parseFloat(DB.debts[0].balance) === 7800, 'balance restored after undoing the borrowing');
+
     DB.debts=[{id:'dbt1', name:'Tafadzwa', balance:8500, currency:'GBP', min_payment:0, archived:false}]; DB.debtPayments=[];
-    d.querySelector('#dstmt-modal [data-close]').click(); await A.boot(); await wait(80);
+    const dsm=d.querySelector('#dstmt-modal [data-close]'); if(dsm) dsm.click(); await A.boot(); await wait(80);
 
     // week nav: forward one week, back two (into the past), then label-click resets
     const before = d.getElementById('pl-month').textContent;
