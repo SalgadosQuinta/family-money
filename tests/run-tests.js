@@ -1685,6 +1685,37 @@ async function cycleSpace(dom, A){
     assert(mapped.find(p=>p.title==='SPAR groceries' && p.kind==='item'), 'receipt mapped as outgoing item');
   }
 
+  console.log('--- Expired session recovery ---');
+  {
+    let refreshCalls = 0, tokenValid = false;
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){
+        w.fetch = function(url, opts){
+          url = String(url);
+          if(url.includes('/auth/v1/token?grant_type=refresh_token')){
+            refreshCalls++;
+            return new Promise(res=>setTimeout(()=>{ tokenValid = true;
+              res({ok:true, status:200, json:()=>Promise.resolve({access_token:'AT2', refresh_token:'RT2', user:{id:UID, email:'r@x.com'}}), text:()=>Promise.resolve('')}); }, 60));
+          }
+          if(url.includes('/rest/v1/')){
+            const auth = (opts && opts.headers && (opts.headers.Authorization||opts.headers.authorization)) || '';
+            if(!tokenValid && auth.includes('AT-EXPIRED')){
+              return Promise.resolve({ok:false, status:401, text:()=>Promise.resolve('[{"code":"PGRST303","message":"JWT expired"}]')});
+            }
+            return mockFetch(url, opts);
+          }
+          return mockFetch(url, opts);
+        };
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT-EXPIRED', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}}));
+      }});
+    await wait(700);
+    const d2 = dom.window.document, A3 = dom.window.App;
+    assert(refreshCalls === 1, 'concurrent 401s share a single refresh (calls=' + refreshCalls + ')');
+    assert(A3.state.session.access_token === 'AT2', 'session renewed with the new token');
+    assert(A3.state.isMember === true, 'membership recovered after renewal');
+    assert(d2.getElementById('notmember').style.display === 'none', 'not-a-member banner cleared');
+  }
+
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

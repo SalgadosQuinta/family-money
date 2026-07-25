@@ -1303,17 +1303,23 @@ var App = (function(){
 
   function refreshToken(){
     if(!state.session || !state.session.refresh_token) return Promise.reject(new Error('No session'));
-    return fetch(SUPABASE_URL + '/auth/v1/token?grant_type=refresh_token', {
+    // Single-flight: concurrent 401s share one refresh. Refresh tokens rotate on
+    // use, so parallel refreshes make the later ones fail as token reuse.
+    if(refreshToken._inflight) return refreshToken._inflight;
+    var p = fetch(SUPABASE_URL + '/auth/v1/token?grant_type=refresh_token', {
       method:'POST',
       headers:{'apikey':ANON_KEY,'Content-Type':'application/json'},
       body: JSON.stringify({refresh_token: state.session.refresh_token})
     }).then(function(r){
-      if(!r.ok) throw new Error('Refresh failed');
+      if(!r.ok){ var e = new Error('Refresh failed'); e.authDead = (r.status === 400 || r.status === 401); throw e; }
       return r.json();
     }).then(function(j){
       saveSession({access_token:j.access_token, refresh_token:j.refresh_token, user:j.user});
       return state.session;
     });
+    refreshToken._inflight = p.then(function(v){ refreshToken._inflight = null; return v; },
+      function(e){ refreshToken._inflight = null; throw e; });
+    return refreshToken._inflight;
   }
 
   // fetch wrapper with refresh-on-401 (one retry)
@@ -1331,7 +1337,10 @@ var App = (function(){
         if(timer) clearTimeout(timer);
         if(r.status === 401 && !_retried && state.session){
           return refreshToken().then(function(){ return api(path, opts, true); })
-            .catch(function(){ signOut(); throw new Error('Session expired'); });
+            .catch(function(e){
+              if(e && e.authDead){ signOut(); throw new Error('Session expired \u2014 please sign in again'); }
+              throw e; // network failure: surface as offline, do not log out
+            });
         }
         return r;
       })
@@ -1367,7 +1376,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v48';
+  var APP_BUILD = 'v49';
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
      is down we render the last-known data with a visible banner.
@@ -1907,7 +1916,13 @@ var App = (function(){
             try{ uids = (JSON.parse(t)||[]).map(function(m){ return m.user_id.slice(0,8) + ':' + m.role; }).join(', '); }catch(e){ uids = t.slice(0,120); }
             dg.textContent = 'Signed in as ' + (u.email||'unknown') + ' \u00b7 session uid ' + (u.id?u.id.slice(0,8):'none') + ' \u00b7 build ' + APP_BUILD +
               ' \u00b7 live check: HTTP ' + r.status + ' \u00b7 members [' + uids + ']' +
-              (r.status===200 ? '' : ' \u00b7 this status code is the fault \u2014 send me a screenshot');
+              (r.status===200 ? '' : (r.status===401 ? ' \u00b7 session expired \u2014 renewing automatically\u2026' : ' \u00b7 this status code is the fault \u2014 send me a screenshot'));
+            if(r.status === 401 && state.session){
+              refreshToken().then(function(){ return loadMembers(); })
+                .then(function(){ showApp(); if(state.isMember){ toast('Session renewed.'); boot(); } })
+                .catch(function(e){ if(e && e.authDead){ signOut(); } });
+              return;
+            }
             // If the raw check finds the member the app missed, self-heal.
             try{
               var rows = JSON.parse(t) || [];
