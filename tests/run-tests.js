@@ -470,6 +470,18 @@ async function cycleSpace(dom, A){
     DB.debts=[{id:'dbt1', name:'Tafadzwa', balance:8500, currency:'GBP', min_payment:0, archived:false}]; DB.debtPayments=[];
     const dsm=d.querySelector('#dstmt-modal [data-close]'); if(dsm) dsm.click(); await A.boot(); await wait(80);
 
+    // Calendar mode month navigation must not be clobbered by the weeks anchor
+    A.state.plMode = 'cal';
+    A.state.plMonth = A.todayISO().slice(0,7);
+    const calStart = A.state.plMonth;
+    d.getElementById('pl-next').click(); await wait(100);
+    assert(A.state.plMonth === A.shiftMonth(calStart,1), 'calendar steps forward to the next month (August reachable)');
+    assert(d.getElementById('pl-month').textContent !== '' && !d.getElementById('pl-month').textContent.includes('this week first'), 'calendar label shows the month, not the weeks range');
+    d.getElementById('pl-prev').click(); await wait(80);
+    d.getElementById('pl-prev').click(); await wait(80);
+    assert(A.state.plMonth === A.shiftMonth(calStart,-1), 'calendar steps back below the current month');
+    A.state.plMode = 'weeks'; A.state.plWeekOffset = 0; A.renderPlanner(); await wait(60);
+
     // week nav: forward one week, back two (into the past), then label-click resets
     const before = d.getElementById('pl-month').textContent;
     d.getElementById('pl-next').click(); await wait(80);

@@ -1364,7 +1364,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v45';
+  var APP_BUILD = 'v46';
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
      is down we render the last-known data with a visible banner.
@@ -2105,7 +2105,8 @@ var App = (function(){
     if(state.plWeekOffset === undefined) state.plWeekOffset = 0;
     var first = addWeeksISO(currentFriday(), state.plWeekOffset);
     var weeks = weeksWindow(first, 4);
-    state.plMonth = first.slice(0,7); // keeps loaders and recurrence in step
+    if(state.plMode === 'weeks'){ state.plMonth = first.slice(0,7); } // weeks board drives the month; calendar/day keep their own
+    else if(!state.plMonth){ state.plMonth = todayISO().slice(0,7); }
     var lbl = fmtShort(weeks[0]) + ' \u2013 ' + fmtShort(weeks[weeks.length-1]);
     if(state.plMode !== 'weeks'){ $('pl-month').textContent = monthLabel(state.plMonth); }
     else {
