@@ -408,7 +408,10 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
     <div class="panel" style="margin-top:14px">
       <h2>AI capture</h2>
       <p class="small muted" style="margin-top:0">Paste a bill, email or statement. Claude will propose items to add to the planner — you review before anything is saved.</p>
-      <textarea id="cap-text" placeholder="Paste text here…" style="min-height:90px"></textarea>
+      <textarea id="cap-text" placeholder="Paste text here… or just attach a document below" style="min-height:90px"></textarea>
+      <label class="f" style="margin-top:8px">Photo or document (up to 3 — camera, gallery or files)</label>
+      <input id="cap-imgs" type="file" accept="image/*" multiple>
+      <div id="cap-imglist" class="small muted" style="min-height:14px"></div>
       <div class="btnrow"><button class="btn primary" id="cap-btn">Analyse</button></div>
     </div>
   </section>
@@ -1364,7 +1367,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v46';
+  var APP_BUILD = 'v47';
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
      is down we render the last-known data with a visible banner.
@@ -2606,6 +2609,9 @@ var App = (function(){
   function mapCaptureResponse(j){
     var raw = (j && (j.finance_payments || j.payments || j.items)) || [];
     if(!Array.isArray(raw)) raw = [];
+    raw = raw.map(function(r){ r = Object.assign({}, r); if(!r.direction && !r.type) r.direction = 'out'; return r; });
+    ((j && j.finance_revenue) || []).forEach(function(r){ raw.push(Object.assign({}, r, {direction:'income', date:r.expected_date || r.date})); });
+    ((j && j.expenses) || []).forEach(function(r){ raw.push(Object.assign({}, r, {direction:'out', date:r.spent_at || r.date, title:(r.note || r.name || 'Expense')})); });
     return raw.map(function(r){
       var amt = parseFloat(r.amount != null ? r.amount : r.value);
       var date = r.due_date || r.date || todayISO();
@@ -2623,19 +2629,49 @@ var App = (function(){
     }).filter(function(p){ return p.amount > 0; });
   }
 
+  function capFileToImage(f){
+    return new Promise(function(res, rej){
+      if(!/^image\//.test(f.type)){ rej(new Error(f.name + ' is not an image — photograph the document instead')); return; }
+      var readPlain = function(){ var r = new FileReader();
+        r.onload = function(){ res({media_type:f.type, data:String(r.result).split(',')[1]}); };
+        r.onerror = function(){ rej(new Error('Could not read ' + f.name)); };
+        r.readAsDataURL(f); };
+      if(f.size <= 1.5*1024*1024){ readPlain(); return; }
+      var url = URL.createObjectURL(f);
+      var img = new Image();
+      img.onload = function(){
+        try{
+          var MAX = 1568, w = img.naturalWidth, h = img.naturalHeight;
+          var sc = Math.min(1, MAX/Math.max(w,h));
+          var c = document.createElement('canvas'); c.width = Math.round(w*sc); c.height = Math.round(h*sc);
+          c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+          URL.revokeObjectURL(url);
+          var b64 = c.toDataURL('image/jpeg', 0.82).split(',')[1];
+          if(b64.length*0.75 > 4.5*1024*1024){ rej(new Error(f.name + ' is too large even after compression')); return; }
+          res({media_type:'image/jpeg', data:b64});
+        }catch(e){ URL.revokeObjectURL(url); readPlain(); }
+      };
+      img.onerror = function(){ URL.revokeObjectURL(url); rej(new Error('Could not read ' + f.name)); };
+      img.src = url;
+    });
+  }
   function runCapture(){
     var text = $('cap-text').value.trim();
-    if(!text){ toast('Paste something to analyse first.'); return; }
+    var files = Array.prototype.slice.call(($('cap-imgs') && $('cap-imgs').files) || []).slice(0,3);
+    if(!text && !files.length){ toast('Paste text or attach a photo of the document first.'); return; }
     var btn = $('cap-btn'); btn.disabled = true; btn.textContent = 'Analysing…';
-    apiJSON('/functions/v1/smart-capture', {method:'POST', body: JSON.stringify({text:text, context:'family-money-planner'})})
+    Promise.all(files.map(capFileToImage)).then(function(images){
+      return apiJSON('/functions/v1/smart-capture', {method:'POST', body: JSON.stringify({
+        text:text || null, images:images, mode:'finance', today:todayISO(), context:'family-money-planner'})});
+    })
       .then(function(j){
         state.capProposals = mapCaptureResponse(j);
-        if(!state.capProposals.length){ toast('Nothing recognisable found in that text.'); return; }
+        if(!state.capProposals.length){ toast('Nothing recognisable found — try a clearer photo or add a note of what it is.'); return; }
         renderCaptureReview();
         modalOpen('cap-modal');
       })
       .catch(function(e){ toast('Capture failed: ' + e.message); })
-      .then(function(){ btn.disabled = false; btn.textContent = 'Analyse'; });
+      .then(function(){ btn.disabled = false; btn.textContent = 'Analyse'; if($('cap-imgs')) $('cap-imgs').value=''; if($('cap-imglist')) $('cap-imglist').textContent=''; });
   }
 
   function renderCaptureReview(){
@@ -3977,6 +4013,7 @@ var App = (function(){
       moveSpace('pitem', it.id).catch(function(e){ toast(e.message); });
     });
     $('cap-btn').addEventListener('click', runCapture);
+    if($('cap-imgs')) $('cap-imgs').addEventListener('change', function(){ var fs=Array.prototype.slice.call(this.files||[]); $('cap-imglist').textContent = fs.length ? fs.map(function(f){ return f.name + ' (' + (f.size/1048576).toFixed(1) + ' MB)'; }).join(' · ') + (fs.some(function(f){ return f.size > 1.5*1048576; }) ? ' — large photos will be compressed automatically' : '') : ''; });
     $('stmt-file').addEventListener('change', function(){ if(this.files[0]) handleStatementFile(this.files[0]); });
     $('stmt-add').addEventListener('click', addApprovedStatement);
     $('stmt-props').addEventListener('input', function(e){

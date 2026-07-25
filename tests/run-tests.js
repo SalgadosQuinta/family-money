@@ -1661,6 +1661,28 @@ async function cycleSpace(dom, A){
     assert(fm.includes('monthWeekMarked(rows, incomeExpected, incomeRow)'), 'income list marked by month/week');
     assert(fm.includes('.msep::before') && fm.includes('.wksep::before'), 'visual (non-text) month bar and week tick styles present');
   }
+  console.log('--- Document AI capture ---');
+  {
+    const fmC = fs.readFileSync(path.join(__dirname,'..','index.html'),'utf8');
+    assert(fmC.includes('id="cap-imgs"') && fmC.includes('accept="image/*" multiple'), 'document photo input on AI capture');
+    assert(fmC.includes("mode:'finance'"), 'finance mode requested from smart-capture');
+    assert(fmC.includes('function capFileToImage') && fmC.includes("toDataURL('image/jpeg', 0.82)"), 'large photos downscaled client-side');
+    // mapping: revenue and expenses join payments
+    const { JSDOM } = require('jsdom');
+    const dm = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){ w.fetch = mockFetch; w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}})); }});
+    await wait(250);
+    const A2 = dm.window.App;
+    const mapped = A2.mapCaptureResponse({
+      finance_payments:[{name:'Eskom electricity', amount:'1450', currency:'ZAR', due_date:'2026-08-05', recurring:'monthly'}],
+      finance_revenue:[{name:'Egg sales', amount:'200', currency:'USD', expected_date:'2026-08-01'}],
+      expenses:[{note:'SPAR groceries', amount:'86.40', currency:'ZAR', spent_at:'2026-07-20'}]
+    });
+    assert(mapped.length === 3, 'payments, revenue and expenses all mapped');
+    assert(mapped.find(p=>p.title==='Egg sales' && p.kind==='income'), 'revenue mapped as income');
+    assert(mapped.find(p=>p.title==='SPAR groceries' && p.kind==='item'), 'receipt mapped as outgoing item');
+  }
+
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
