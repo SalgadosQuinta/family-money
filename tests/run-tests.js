@@ -351,11 +351,25 @@ async function cycleSpace(dom, A){
     assert(DB.planner[0].paid === true && DB.planner[0].paid_by === UID, 'paid tick persists who marked it');
     assert(d.querySelector('.card.paid') !== null, 'paid card styled as paid');
 
+    // Overdue marking: lapsed bills and items are unmistakable on the board
+    DB.bills.push({id:'blOD', name:'Council tax', amount:180, currency:'GBP', due_date:'2026-07-02', recurrence:'monthly', archived:false});
+    DB.planner.push({id:'plOD', title:'Vet bill', amount:75, currency:'GBP', week_date:A.currentFriday(), on_date:'2026-07-20', paid:false, recurrence:'none'});
+    await A.boot(); await wait(120);
+    const boardOD = d.getElementById('pl-board').innerHTML;
+    assert(boardOD.includes('OVERDUE') && boardOD.includes('Council tax'), 'overdue bill badged on the board');
+    assert(/\d+d overdue — was due/.test(boardOD), 'overdue cards state how late and the original date');
+    assert(boardOD.includes('Overdue — rolled over, unpaid'), 'rolled section headed in overdue terms with a count');
+    const odCard = d.querySelector('#pl-board .card.od');
+    assert(odCard, 'overdue cards carry the red treatment class');
+    assert(boardOD.includes('Vet bill') && d.querySelectorAll('#pl-board .card.od').length >= 2, 'lapsed planner item marked overdue too');
+    DB.bills = DB.bills.filter(x=>x.id!=='blOD'); DB.planner = DB.planner.filter(x=>x.id!=='plOD');
+    await A.boot(); await wait(80);
+
     // Rollover: an unpaid item from a past week appears in the current week column
     DB.planner.push({id:'plOld', title:'Vet visit', amount:50, currency:'GBP', week_date:A.addWeeksISO(A.currentFriday(),-2), paid:false, recurrence:'none'});
     await A.boot(); await wait(100);
     const nowCol = d.querySelector('#pl-board .wcol.nowweek');
-    assert(nowCol && nowCol.innerHTML.includes('Vet visit') && nowCol.innerHTML.includes('Rolled over'), 'unpaid past item rolls into the current week');
+    assert(nowCol && nowCol.innerHTML.includes('Vet visit') && nowCol.innerHTML.includes('rolled over, unpaid'), 'unpaid past item rolls into the current week');
     assert(nowCol.innerHTML.includes('from '), 'rolled card shows its origin week');
     // it counts in the current week totals
     assert(nowCol.querySelector('.wfoot').textContent.includes('GBP') || nowCol.querySelector('.wfoot').textContent.length > 0, 'totals rendered with rollover included');

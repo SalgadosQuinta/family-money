@@ -128,6 +128,10 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
 .card.income{border-left:3px solid var(--green)}
 .wcol.nowweek{border:1px solid var(--brass);border-radius:var(--radius)}
 .card.rolled{border-left:3px solid var(--brass);background:rgba(217,164,56,.06)}
+.card.od{border-left:3px solid var(--red);background:rgba(214,90,80,.08)}
+.card.rolled.od{border-left:3px solid var(--red)}
+.badge.od{background:var(--red);color:#fff;font-family:var(--mono,monospace);font-size:9px;letter-spacing:.06em;padding:1.5px 5px}
+.small.red{color:var(--red)}
 .card.debtpay{border-left:3px solid var(--purple);opacity:.92}
 .card.debtplan{border-left:3px solid var(--purple)}
 .badge.debt{background:rgba(138,99,184,.2);color:var(--purple)}
@@ -1158,6 +1162,11 @@ var App = (function(){
     return d.toLocaleDateString('en-GB', {month:'long', year:'numeric'});
   }
   // Weekly maths (also used by tests): items+bills out, income in, per currency
+  function itemLapsed(i){
+    if(i.paid) return false;
+    var d = i.on_date || i.week_date;
+    return !!d && d < todayISO();
+  }
   function weekTotals(weekISO, income, items, bills){
     var out = {}, inc = {};
     items.forEach(function(it){ if(it.week_date === weekISO) out[it.currency] = (out[it.currency]||0) + Number(it.amount); });
@@ -1376,7 +1385,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v49';
+  var APP_BUILD = 'v50';
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
      is down we render the last-known data with a visible banner.
@@ -2141,10 +2150,11 @@ var App = (function(){
           '<span class="amount in">' + esc(fmtMoney(i.amount, i.currency)) + '</span></div></div>';
       }).join('');
       var billCards = state.bills.filter(function(b){ return !b.archived && fridayOf(b.due_date) === w; }).map(function(b){
-        return '<div class="card bill-card" draggable="true" data-kind="bill" data-id="' + esc(b.id) + '">' +
-          '<div class="crow"><span class="ctitle">' + esc(b.name) + '</span>' +
-          '<span class="amount">' + esc(fmtMoney(b.amount, b.currency)) + '</span></div>' +
-          '<div class="cactions"><span class="small muted">bill · due ' + esc(fmtShort(b.due_date)) + '</span></div></div>';
+        var od = isOverdue(b);
+        return '<div class="card bill-card' + (od ? ' od' : '') + '" draggable="true" data-kind="bill" data-id="' + esc(b.id) + '">' +
+          '<div class="crow"><span class="ctitle">' + (od ? '<span class="badge od">OVERDUE</span> ' : '') + esc(b.name) + '</span>' +
+          '<span class="amount' + (od ? ' overdue' : '') + '">' + esc(fmtMoney(b.amount, b.currency)) + '</span></div>' +
+          '<div class="cactions"><span class="small' + (od ? ' red' : ' muted') + '">bill · ' + (od ? Math.abs(daysUntil(b.due_date)) + 'd overdue — was due ' : 'due ') + esc(fmtShort(b.due_date)) + '</span></div></div>';
       }).join('');
       var debtCards = state.debtPayments.filter(function(p){ return p.kind !== 'borrow' && p.paid_at && fridayOf(p.paid_at.slice(0,10)) === w; }).map(function(p){
         t.out[p.currency] = (t.out[p.currency]||0) + Number(p.amount);
@@ -2155,8 +2165,9 @@ var App = (function(){
           '<div class="cactions"><span class="small muted">paid ' + esc(fmtShort(p.paid_at.slice(0,10))) + (p.note ? ' · ' + esc(p.note) : '') + '</span><button class="linkbtn" data-act="dpundo" data-id="' + esc(p.id) + '">Undo</button></div></div>';
       }).join('');
       var itemCards = state.planItems.filter(function(i){ return i.week_date === w; }).map(function(i){
-        return '<div class="card' + (i.paid ? ' paid' : '') + (i.debt_id ? ' debtplan' : '') + '" draggable="true" data-kind="item" data-id="' + esc(i.id) + '">' +
-          '<div class="crow"><span class="ctitle">' + esc(i.title) + (i.debt_id ? ' <span class="badge debt">planned</span>' : '') + (i.recurrence && i.recurrence !== 'none' ? ' <span class="badge brass">' + esc(i.recurrence) + '</span>' : '') + (i.on_date ? ' <span class="badge">' + esc(fmtShort(i.on_date)) + '</span>' : '') + '</span>' +
+        var ilap = itemLapsed(i);
+        return '<div class="card' + (i.paid ? ' paid' : '') + (i.debt_id ? ' debtplan' : '') + (ilap ? ' od' : '') + '" draggable="true" data-kind="item" data-id="' + esc(i.id) + '">' +
+          '<div class="crow"><span class="ctitle">' + (ilap ? '<span class="badge od">OVERDUE</span> ' : '') + esc(i.title) + (i.debt_id ? ' <span class="badge debt">planned</span>' : '') + (i.recurrence && i.recurrence !== 'none' ? ' <span class="badge brass">' + esc(i.recurrence) + '</span>' : '') + (i.on_date ? ' <span class="badge">' + esc(fmtShort(i.on_date)) + '</span>' : '') + '</span>' +
           '<span class="amount">' + esc(fmtMoney(i.amount, i.currency)) + '</span></div>' +
           '<div class="cactions"><button class="paidtick' + (i.paid ? ' on' : '') + '" data-act="ptick" data-id="' + esc(i.id) + '">' +
           (i.paid ? 'Paid' : 'Mark paid') + '</button></div></div>';
@@ -2168,20 +2179,20 @@ var App = (function(){
         var rolledItems = state.planItems.filter(function(i){ return !i.paid && i.week_date && i.week_date < cf; });
         var rolledBills = state.bills.filter(function(b){ return !b.archived && fridayOf(b.due_date) < cf; });
         rolledCards = (rolledItems.length || rolledBills.length)
-          ? '<div class="wsec" style="color:var(--brass)">Rolled over — unpaid</div>' +
+          ? '<div class="wsec" style="color:var(--red)">\u26a0 Overdue — rolled over, unpaid (' + (rolledItems.length + rolledBills.length) + ')</div>' +
             rolledBills.map(function(b){
               t.out[b.currency] = (t.out[b.currency]||0) + Number(b.amount);
               t.rem[b.currency] = (t.rem[b.currency]||0) - Number(b.amount);
-              return '<div class="card bill-card rolled" draggable="true" data-kind="bill" data-id="' + esc(b.id) + '">' +
-                '<div class="crow"><span class="ctitle">' + esc(b.name) + ' <span class="badge roll">from ' + esc(fmtShort(fridayOf(b.due_date))) + '</span></span>' +
+              return '<div class="card bill-card rolled od" draggable="true" data-kind="bill" data-id="' + esc(b.id) + '">' +
+                '<div class="crow"><span class="ctitle"><span class="badge od">OVERDUE</span> ' + esc(b.name) + ' <span class="badge roll">from ' + esc(fmtShort(fridayOf(b.due_date))) + '</span></span>' +
                 '<span class="amount overdue">' + esc(fmtMoney(b.amount, b.currency)) + '</span></div>' +
-                '<div class="cactions"><span class="small muted">bill · was due ' + esc(fmtShort(b.due_date)) + '</span></div></div>';
+                '<div class="cactions"><span class="small red">bill · ' + Math.abs(daysUntil(b.due_date)) + 'd overdue — was due ' + esc(fmtShort(b.due_date)) + '</span></div></div>';
             }).join('') +
             rolledItems.map(function(i){
               t.out[i.currency] = (t.out[i.currency]||0) + Number(i.amount);
               t.rem[i.currency] = (t.rem[i.currency]||0) - Number(i.amount);
-              return '<div class="card rolled" draggable="true" data-kind="item" data-id="' + esc(i.id) + '">' +
-                '<div class="crow"><span class="ctitle">' + esc(i.title) + ' <span class="badge roll">from ' + esc(fmtShort(i.week_date)) + '</span></span>' +
+              return '<div class="card rolled od" draggable="true" data-kind="item" data-id="' + esc(i.id) + '">' +
+                '<div class="crow"><span class="ctitle"><span class="badge od">OVERDUE</span> ' + esc(i.title) + ' <span class="badge roll">from ' + esc(fmtShort(i.week_date)) + '</span></span>' +
                 '<span class="amount overdue">' + esc(fmtMoney(i.amount, i.currency)) + '</span></div>' +
                 '<div class="cactions"><button class="paidtick" data-act="ptick" data-id="' + esc(i.id) + '">Mark paid</button></div></div>';
             }).join('')
