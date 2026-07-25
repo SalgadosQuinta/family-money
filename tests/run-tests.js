@@ -1664,7 +1664,9 @@ async function cycleSpace(dom, A){
   console.log('--- Document AI capture ---');
   {
     const fmC = fs.readFileSync(path.join(__dirname,'..','index.html'),'utf8');
-    assert(fmC.includes('id="cap-imgs"') && fmC.includes('accept="image/*" multiple'), 'document photo input on AI capture');
+    assert(fmC.includes('id="cap-imgs"') && fmC.includes('accept="image/*,application/pdf" multiple'), 'photo and PDF input on AI capture');
+    assert(fmC.includes("media_type:'application/pdf'") && fmC.includes('documents:documents'), 'PDFs sent as documents alongside images');
+    assert(fmC.includes('max 8 MB for PDFs'), 'PDF size guarded');
     assert(fmC.includes("mode:'finance'"), 'finance mode requested from smart-capture');
     assert(fmC.includes('function capFileToImage') && fmC.includes("toDataURL('image/jpeg', 0.82)"), 'large photos downscaled client-side');
     // mapping: revenue and expenses join payments

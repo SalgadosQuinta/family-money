@@ -409,8 +409,8 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
       <h2>AI capture</h2>
       <p class="small muted" style="margin-top:0">Paste a bill, email or statement. Claude will propose items to add to the planner — you review before anything is saved.</p>
       <textarea id="cap-text" placeholder="Paste text here… or just attach a document below" style="min-height:90px"></textarea>
-      <label class="f" style="margin-top:8px">Photo or document (up to 3 — camera, gallery or files)</label>
-      <input id="cap-imgs" type="file" accept="image/*" multiple>
+      <label class="f" style="margin-top:8px">Photo or PDF (up to 3 — camera, gallery or files)</label>
+      <input id="cap-imgs" type="file" accept="image/*,application/pdf" multiple>
       <div id="cap-imglist" class="small muted" style="min-height:14px"></div>
       <div class="btnrow"><button class="btn primary" id="cap-btn">Analyse</button></div>
     </div>
@@ -1367,7 +1367,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v47';
+  var APP_BUILD = 'v48';
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
      is down we render the last-known data with a visible banner.
@@ -2631,7 +2631,15 @@ var App = (function(){
 
   function capFileToImage(f){
     return new Promise(function(res, rej){
-      if(!/^image\//.test(f.type)){ rej(new Error(f.name + ' is not an image — photograph the document instead')); return; }
+      if(f.type === 'application/pdf'){
+        if(f.size > 8*1024*1024){ rej(new Error(f.name + ' is too large (max 8 MB for PDFs)')); return; }
+        var rp = new FileReader();
+        rp.onload = function(){ res({media_type:'application/pdf', data:String(rp.result).split(',')[1]}); };
+        rp.onerror = function(){ rej(new Error('Could not read ' + f.name)); };
+        rp.readAsDataURL(f);
+        return;
+      }
+      if(!/^image\//.test(f.type)){ rej(new Error(f.name + ' is not an image or PDF — photograph the document instead')); return; }
       var readPlain = function(){ var r = new FileReader();
         r.onload = function(){ res({media_type:f.type, data:String(r.result).split(',')[1]}); };
         r.onerror = function(){ rej(new Error('Could not read ' + f.name)); };
@@ -2660,9 +2668,11 @@ var App = (function(){
     var files = Array.prototype.slice.call(($('cap-imgs') && $('cap-imgs').files) || []).slice(0,3);
     if(!text && !files.length){ toast('Paste text or attach a photo of the document first.'); return; }
     var btn = $('cap-btn'); btn.disabled = true; btn.textContent = 'Analysing…';
-    Promise.all(files.map(capFileToImage)).then(function(images){
+    Promise.all(files.map(capFileToImage)).then(function(atts){
+      var images = atts.filter(function(a){ return a.media_type !== 'application/pdf'; });
+      var documents = atts.filter(function(a){ return a.media_type === 'application/pdf'; });
       return apiJSON('/functions/v1/smart-capture', {method:'POST', body: JSON.stringify({
-        text:text || null, images:images, mode:'finance', today:todayISO(), context:'family-money-planner'})});
+        text:text || null, images:images, documents:documents, mode:'finance', today:todayISO(), context:'family-money-planner'})});
     })
       .then(function(j){
         state.capProposals = mapCaptureResponse(j);
