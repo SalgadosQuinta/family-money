@@ -1874,9 +1874,9 @@ async function cycleSpace(dom, A){
     w2.App.state.settings.buffer = {name:'Nationwide Buffer', currency:'GBP', balance:480, entries:[]};
     w2.App.renderAll(); await wait(60);
     const buf = d2.getElementById('d-buffer-top').textContent;
-    assert(buf.startsWith('$') && !buf.startsWith('$0'), 'GBP buffer converts via fallback when the feed is down (got ' + buf + ')');
-    const expected = Math.round(480/0.79);
-    assert(buf.replace(/[^0-9]/g,'') === String(expected), 'fallback conversion arithmetic correct');
+    assert(buf.startsWith('\u00a3') && buf.includes('480'), 'buffer shown natively in the currency it is held in (got ' + buf + ')');
+    // net worth still converts via the fallback when the feed is down
+    assert(d2.getElementById('d-networth-top').textContent.startsWith('$'), 'net worth stays a single USD figure');
   }
 
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');

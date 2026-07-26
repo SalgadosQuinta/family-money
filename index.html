@@ -1547,7 +1547,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v58';
+  var APP_BUILD = 'v59';
   try{ window.APP_BUILD_PUBLIC = APP_BUILD; }catch(e){}
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
@@ -2316,14 +2316,14 @@ var App = (function(){
       };
       var usdStr = function(r){ return '$' + Math.round(r.total).toLocaleString('en-GB') + (r.complete ? '' : '*'); };
       var bf0 = bufferData();
-      var bufU = toUSD((function(){ var o={}; o[bf0.currency]=bf0.balance; return o; })());
-      $('d-buffer-top').textContent = usdStr(bufU);
+      // The buffer stays in the currency it is held in — no conversion.
+      $('d-buffer-top').textContent = fmtMoney(bf0.balance, bf0.currency);
       var dtot = {};
       state.debts.forEach(function(d0){ if(!d0.archived) dtot[d0.currency] = (dtot[d0.currency]||0) + Number(d0.balance); });
       $('d-debt-top').textContent = Object.keys(dtot).length ? usdStr(toUSD(dtot)) : 'None';
       var nwU = toUSD(netWorth());
       $('d-networth-top').textContent = usdStr(nwU);
-      $('d-networth-sub').textContent = (bufU.complete && nwU.complete) ? 'approx, in USD' : 'approx, in USD · * a currency without a rate is excluded — set it in Admin';
+      $('d-networth-sub').textContent = (nwU.complete) ? 'approx, in USD' : 'approx, in USD · * a currency without a rate is excluded — set it in Admin';
     }
     if($('d-today2')) $('d-today2').textContent = '';
 
