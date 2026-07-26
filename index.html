@@ -600,7 +600,7 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
 
   <!-- ADMIN -->
   <section id="view-admin" style="display:none">
-    <div class="panel fam-only">
+    <div class="panel fam-only" id="ad-members-card">
       <h2>Family members</h2>
       <p class="small muted" style="margin-top:0">Add an existing login account to the family space by email. Creating new login accounts and resetting passwords stays in your GTD console.</p>
       <div id="ad-members"></div>
@@ -615,12 +615,12 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
       <p class="small muted" style="margin-top:0">Not bank reconciliation — these mark money held by people or in transit: floats held by a family member, cash pots, money with an intermediary. Tag payments with them so held money is traceable.</p>
       <div id="ad-accounts"></div>
     </div>
-    <div class="panel fam-only">
+    <div class="panel fam-only" id="ad-grants-card">
       <h2>TRJ Farms access</h2>
-      <p class="small muted" style="margin-top:0">Members ticked here can enter and see the TRJ Farms space. Family, private and business data stay unaffected.</p>
+      <p class="small muted" style="margin-top:0" data-grants>Members ticked here can enter and see the TRJ Farms space. Family, private and business data stay unaffected.</p>
       <div id="ad-farm-grants"></div>
     </div>
-    <div class="panel fam-only">
+    <div class="panel fam-only" id="ad-backups-card">
       <h2>Backups</h2>
       <p class="small muted" style="margin-top:0">A full backup runs automatically every night at 02:00 UTC and lands below (60-day retention), with an off-platform copy to SharePoint when configured. Manual export remains for the before-migration snapshot. Restore procedure: BACKUP-AND-RESILIENCE.md in the repo.</p>
       <div class="wsec">Automatic nightly backups</div>
@@ -1096,6 +1096,7 @@ var App = (function(){
     members: [],         // [{user_id, role}]
     profiles: {},        // id -> {display_name, email}
     isMember: false,
+    isManager: false,
     isAdmin: false,
     bills: [],
     payments: [],
@@ -1442,7 +1443,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v51';
+  var APP_BUILD = 'v52';
   try{ window.APP_BUILD_PUBLIC = APP_BUILD; }catch(e){}
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
@@ -1620,7 +1621,7 @@ var App = (function(){
     badge.style.borderColor = col; badge.style.color = col;
     var adminTab = $('tab-admin');
     adminTab.textContent = sp === 'family' ? 'Admin' : 'Setup';
-    adminTab.style.display = (sp !== 'family' || state.isAdmin) ? '' : 'none';
+    adminTab.style.display = (sp !== 'family' || state.isAdmin || state.isManager) ? '' : 'none';
     document.querySelectorAll('.fam-only').forEach(function(el){ el.style.display = sp === 'family' ? '' : 'none'; });
   }
   function switchSpaceReload(){
@@ -1730,6 +1731,7 @@ var App = (function(){
       var me = state.members.find(function(m){ return m.user_id === uid; });
       state.isMember = !!me;
       state.isAdmin = !!(me && me.role === 'admin');
+      state.isManager = !!(me && (me.role === 'admin' || me.role === 'manager'));
       if(state.members.length){
         var ids = state.members.map(function(m){ return '"' + m.user_id + '"'; }).join(',');
         return apiJSON('/rest/v1/profiles?select=id,display_name,email&id=in.(' + ids + ')').then(function(ps){
@@ -3473,6 +3475,12 @@ var App = (function(){
 
   /* ---------------- admin ---------------- */
   function renderAdmin(){
+    // Household controls (members, grants, backups) are full-admin only;
+    // managers see the money-maintenance parts of this screen.
+    ['ad-members-card','ad-grants-card','ad-backups-card'].forEach(function(id){
+      var el = document.getElementById(id);
+      if(el) el.style.display = state.isAdmin ? '' : 'none';
+    });
     var sp = currentSpace();
     $('tab-admin').textContent = sp === 'family' ? 'Admin' : 'Setup';
     $('tab-admin').style.display = (sp !== 'family' || state.isAdmin) ? '' : 'none';
@@ -3510,12 +3518,24 @@ var App = (function(){
       }).join('');
     }
     if($('rate-zwg') && document.activeElement !== $('rate-zwg')) $('rate-zwg').value = ((state.settings.manual_rates || {}).ZWG) || '';
+    var myId = state.session && state.session.user ? state.session.user.id : null;
     $('ad-members').innerHTML = state.members.map(function(m){
-      return '<div class="item"><div><strong>' + esc(memberName(m.user_id)) + '</strong>' +
-        (m.role === 'admin' ? '<span class="badge brass">Admin</span>' : '') +
-        '<div class="small muted">' + esc((state.profiles[m.user_id]||{}).email || '') + '</div></div>' +
-        (m.role !== 'admin' ? '<button class="linkbtn red" data-act="memdel" data-id="' + esc(m.user_id) + '">Remove</button>' : '') +
-        '</div>';
+      var badge = m.role === 'admin' ? '<span class="badge brass">Admin</span>'
+        : m.role === 'manager' ? '<span class="badge" style="border-color:var(--green);color:var(--green)">Manager</span>' : '';
+      var roleCtl = (state.isAdmin && m.user_id !== myId)
+        ? '<select data-act="memrole" data-id="' + esc(m.user_id) + '" style="width:auto;padding:5px 8px;font-size:12.5px">' +
+            ['member','manager','admin'].map(function(r){
+              return '<option value="' + r + '"' + (m.role === r ? ' selected' : '') + '>' +
+                (r === 'member' ? 'Member' : r === 'manager' ? 'Manager' : 'Admin') + '</option>';
+            }).join('') + '</select>'
+        : '';
+      return '<div class="item"><div><strong>' + esc(memberName(m.user_id)) + '</strong>' + badge +
+        '<div class="small muted">' + esc((state.profiles[m.user_id]||{}).email || '') + '</div>' +
+        (m.role === 'manager' ? '<div class="small muted">Can maintain bills, income, expenses and payments \u00b7 cannot change members, grants or backups</div>' : '') +
+        '</div>' +
+        '<div style="display:flex;gap:8px;align-items:center">' + roleCtl +
+        ((state.isAdmin && m.role !== 'admin') ? '<button class="linkbtn red" data-act="memdel" data-id="' + esc(m.user_id) + '">Remove</button>' : '') +
+        '</div></div>';
     }).join('');
     $('ad-accounts').innerHTML = state.accounts.length ? state.accounts.map(function(a){
       var bal = accountBalance(a.id);
@@ -4031,6 +4051,15 @@ var App = (function(){
     $('bm-save').addEventListener('click', saveBill);
     $('pm-save').addEventListener('click', confirmPaid);
     $('rm-save').addEventListener('click', confirmReceived);
+    document.querySelector('main').addEventListener('change', function(e){
+      var sel = e.target.closest('[data-act="memrole"]'); if(!sel) return;
+      var uid = sel.getAttribute('data-id'), role = sel.value;
+      apiJSON('/rest/v1/fam_members?user_id=eq.' + uid, {method:'PATCH', headers:{'Prefer':'return=minimal'},
+        body:JSON.stringify({role:role})})
+        .then(function(){ toast(memberName(uid) + ' is now ' + (role === 'manager' ? 'a manager' : role === 'admin' ? 'an admin' : 'a member') + '.'); return loadMembers(); })
+        .then(renderAll)
+        .catch(function(err){ toast(err.message); });
+    });
     if($('income-sort')) $('income-sort').addEventListener('change', function(){ state.sortIncome = this.value; renderIncome(); });
     if($('income-add-btn')) $('income-add-btn').addEventListener('click', function(){ openIncomeModal(null); });
     $('ex-save-btn').addEventListener('click', saveExpense);

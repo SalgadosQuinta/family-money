@@ -1751,6 +1751,18 @@ async function cycleSpace(dom, A){
     assert(dom2.window.document.getElementById('fm-stuck-fix'), 'panel offers a reset button');
   }
 
+  console.log('--- Admin tiers ---');
+  {
+    const fmT = fs.readFileSync(path.join(__dirname,'..','index.html'),'utf8');
+    assert(fmT.includes("state.isManager = !!(me && (me.role === 'admin' || me.role === 'manager'))"), 'manager tier derived from role');
+    assert(fmT.includes('data-act="memrole"'), 'admins can change a member\'s tier');
+    assert(fmT.includes("['ad-members-card','ad-grants-card','ad-backups-card']") && fmT.includes('state.isAdmin ? \'\' : \'none\''), 'members, grants and backups stay full-admin only');
+    assert(fmT.includes('ad-members-card') && fmT.includes('ad-grants-card') && fmT.includes('ad-backups-card'), 'household panels are tagged for gating');
+    assert(fmT.includes('state.isAdmin || state.isManager') , 'managers reach the admin screen');
+    // manager must NOT gain business/farm space rights implicitly
+    assert(fmT.includes("if(sp === 'business' && !state.isAdmin) sp = 'family';"), 'space rights unchanged by the manager tier');
+  }
+
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
