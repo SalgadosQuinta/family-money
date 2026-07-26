@@ -1792,6 +1792,16 @@ async function cycleSpace(dom, A){
     assert(d.getElementById('d-buffer').textContent.includes('300'), 'dashboard shows the current buffer');
   }
 
+  console.log('--- Blank-screen watchdog ---');
+  {
+    const fmW = fs.readFileSync(path.join(__dirname,'..','index.html'),'utf8');
+    assert(fmW.includes("stuckPanel('blank')"), 'phase-two watchdog raises the panel on a blank body');
+    assert(fmW.includes('window.__FM_ERRS'), 'JS errors captured from the start');
+    assert(fmW.includes('data-host probe'), 'in-page network probe names profile-level blocking');
+    assert(fmW.includes('fm-stuck-copy'), 'diagnostics can be copied');
+    assert(fmW.includes("__FM_STAGE === 'signin-shown'") , 'sign-in screen exempt from the blank check');
+  }
+
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
