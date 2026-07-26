@@ -747,15 +747,6 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
       <p class="small muted" style="margin-top:0">Set up per person — they don't need to do anything technical beyond a one-off opt-in from their phone: save <strong>+34&nbsp;644&nbsp;44&nbsp;21&nbsp;48</strong> as a contact, WhatsApp it "I allow callmebot to send me messages", and it replies with their personal API key. Enter it below with their number, switch them on, and tick exactly which events notify them.</p>
       <div id="ad-notify"></div>
     </div>
-    <div class="panel fam-only">
-      <h2>Manual exchange rates</h2>
-      <p class="small muted" style="margin-top:0">ZWG has no public daily feed, so set the rate here for the indicative ≈USD figures. Update it whenever the street rate moves.</p>
-      <div class="inline2">
-        <div><label class="f" for="rate-zwg">ZWG per 1 USD</label>
-          <input id="rate-zwg" type="number" inputmode="decimal" step="0.01" min="0"></div>
-        <div style="align-self:end"><button class="btn" id="rate-save">Save rate</button></div>
-      </div>
-    </div>
     <div class="panel">
       <div class="row"><h2>Category budgets</h2><button class="btn" id="bud-add-btn">Add budget</button></div>
       <div id="ad-budgets"></div>
@@ -1200,8 +1191,8 @@ var App = (function(){
   var ANON_KEY = 'sb_publishable_hB7hrrTkLMNh6FrH_FTUSg_cxIlM9Nt';
   var VAPID_PUBLIC = 'BLVIKKCjHYJollBuxb00jUN2eVIAeRbjmRGcNoDSQKawpJum1g6Srq0ZZGPC6YynIMtGGlSGN5ok4v-82ttnJnw';
   var SESSION_KEY = 'fm_session';
-  var CURRENCIES = ['USD','GBP','ZWG','EUR','ZAR'];
-  var CCY_SYMBOL = {USD:'$',GBP:'£',ZWG:'ZWG ',EUR:'€',ZAR:'R'};
+  var CURRENCIES = ['USD','GBP'];
+  var CCY_SYMBOL = {USD:'$',GBP:'£'};
 
   var state = {
     session: null,       // {access_token, refresh_token, user:{id,email}}
@@ -1467,7 +1458,8 @@ var App = (function(){
     if(ccy === 'USD') return Number(amount) || 0;
     if(state.rates && state.rates.rates && state.rates.rates[ccy]) return (Number(amount) || 0) / state.rates.rates[ccy];
     var man = (state.settings && state.settings.manual_rates) || {};
-    if(man[ccy] > 0) return (Number(amount) || 0) / man[ccy]; // e.g. ZWG per USD set in Admin
+    if(man[ccy] > 0) return (Number(amount) || 0) / man[ccy];
+    if(FALLBACK_RATES[ccy]) return (Number(amount) || 0) / FALLBACK_RATES[ccy];
     return null;
   }
 
@@ -1555,7 +1547,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v57';
+  var APP_BUILD = 'v58';
   try{ window.APP_BUILD_PUBLIC = APP_BUILD; }catch(e){}
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
@@ -2126,16 +2118,18 @@ var App = (function(){
       })
       .catch(function(){ state.settings = {}; });
   }
+  var FALLBACK_RATES = {GBP: 0.79}; // last resort so a failed rates feed never zeroes the USD figures
   function loadRates(){
-    try{
-      var cached = JSON.parse(localStorage.getItem('fm_rates') || 'null');
-      if(cached && cached.day === todayISO()){ state.rates = cached.data; return Promise.resolve(); }
-    }catch(e){}
+    var cached = null;
+    try{ cached = JSON.parse(localStorage.getItem('fm_rates') || 'null'); }catch(e){}
+    if(cached && cached.data){ state.rates = cached.data; } // yesterday's rate beats no rate
+    if(cached && cached.day === todayISO()){ return Promise.resolve(); }
     return fetch('https://api.frankfurter.app/latest?base=USD')
       .then(function(r){ return r.ok ? r.json() : null; })
       .then(function(j){
-        if(j){ state.rates = j; localStorage.setItem('fm_rates', JSON.stringify({day:todayISO(), data:j})); }
-      }).catch(function(){ /* offline — indicative USD simply omitted */ });
+        if(j){ state.rates = j; localStorage.setItem('fm_rates', JSON.stringify({day:todayISO(), data:j}));
+          try{ renderDashboard(); }catch(e){} }
+      }).catch(function(){ /* stale cache or the fallback covers the indicative figures */ });
   }
 
   /* ---------------- receipts (storage) ---------------- */
@@ -2355,7 +2349,7 @@ var App = (function(){
       return '<div class="stat"><div class="eyebrow">' + esc(c) + '</div><div class="v">' + esc(fmtMoney(perCcy[c], c)) + '</div></div>';
     }).join('') : '<div class="empty" style="grid-column:1/-1">No commitments in the next 30 days.</div>';
     $('d-usd-note').textContent = ccyKeys.length
-      ? ('≈ ' + fmtMoney(usdTotal,'USD') + ' total' + (usdComplete ? '' : ' (excludes ZWG — no daily rate)'))
+      ? ('≈ ' + fmtMoney(usdTotal,'USD') + ' total' + (usdComplete ? '' : ' (a currency without a rate is excluded)'))
       : '';
 
     // Spend this month vs last month (payments + expenses), per currency
@@ -3735,7 +3729,6 @@ var App = (function(){
           '</div>';
       }).join('');
     }
-    if($('rate-zwg') && document.activeElement !== $('rate-zwg')) $('rate-zwg').value = ((state.settings.manual_rates || {}).ZWG) || '';
     var myId = state.session && state.session.user ? state.session.user.id : null;
     $('ad-members').innerHTML = state.members.map(function(m){
       var badge = m.role === 'admin' ? '<span class="badge brass">Admin</span>'
@@ -4608,16 +4601,6 @@ var App = (function(){
         body:JSON.stringify(body)})
         .then(function(){ toast('Notification settings saved.'); return loadNotifyPrefs().then(renderAdmin); })
         .catch(function(e2){ toast(e2.message); });
-    });
-    $('rate-save').addEventListener('click', function(){
-      var v = parseFloat($('rate-zwg').value);
-      if(!(v > 0)){ toast('Enter a valid rate.'); return; }
-      var man = Object.assign({}, (state.settings && state.settings.manual_rates) || {}, {ZWG: v});
-      apiJSON('/rest/v1/fam_settings?on_conflict=key', {method:'POST',
-        headers:{'Prefer':'return=minimal,resolution=merge-duplicates'},
-        body:JSON.stringify({key:'manual_rates', value:man, updated_by:state.session.user.id, updated_at:new Date().toISOString()})})
-        .then(function(){ state.settings.manual_rates = man; toast('Rate saved.'); renderAll(); })
-        .catch(function(e){ toast(e.message); });
     });
     $('notif-btn').addEventListener('click', enableNotifications);
     document.querySelectorAll('[data-csv]').forEach(function(b){

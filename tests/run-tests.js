@@ -169,7 +169,7 @@ async function cycleSpace(dom, A){
     assert(A.nextDueDate('2026-03-31','quarterly') === '2026-06-30', 'quarterly clamps to 30 June');
     assert(A.nextDueDate('2024-02-29','annually') === '2025-02-28', 'annual leap-day clamps');
     assert(A.fmtMoney(1234.5,'GBP') === '£1,234.50', 'fmtMoney GBP formatting');
-    assert(A.fmtMoney(10,'ZWG').indexOf('ZWG') === 0, 'fmtMoney ZWG prefix');
+    assert(A.fmtMoney(10,'GBP').indexOf('£') === 0, 'fmtMoney GBP symbol');
     assert(A.isOverdue({archived:false, due_date:'2020-01-01'}) === true, 'overdue detection');
     assert(A.isOverdue({archived:true, due_date:'2020-01-01'}) === false, 'archived bill never overdue');
   }
@@ -252,7 +252,7 @@ async function cycleSpace(dom, A){
 
     // --- approxUSD ---
     assert(Math.abs(A.approxUSD(80,'GBP') - 100) < 0.01, 'approxUSD converts via frankfurter rates');
-    assert(A.approxUSD(50,'ZWG') === null, 'ZWG has no rate, returns null gracefully');
+    assert(A.approxUSD(50,'XXX') === null, 'an unknown currency returns null gracefully');
   }
 
   console.log('--- Auth: refresh-on-401 ---');
@@ -675,7 +675,7 @@ async function cycleSpace(dom, A){
 
   console.log('--- PIN, recurring planner, manual rates ---');
   {
-    DB.settings=[{key:'manual_rates', value:{ZWG:40}}];
+    DB.settings=[{key:'manual_rates', value:{ZZZ:40}}];
     DB.planner=[]; DB.income=[];
     const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
       beforeParse(w){ w.fetch = mockFetch;
@@ -684,7 +684,7 @@ async function cycleSpace(dom, A){
     const d = dom.window.document, A = dom.window.App;
 
     // Manual ZWG rate feeds approxUSD
-    assert(Math.abs(A.approxUSD(400,'ZWG') - 10) < 0.001, 'manual ZWG rate converts (400/40 = $10)');
+    assert(Math.abs(A.approxUSD(400,'ZZZ') - 10) < 0.001, 'a manual rate converts (400/40 = $10)');
     assert(Math.abs(A.approxUSD(80,'GBP') - 100) < 0.01, 'frankfurter rates still preferred where available');
 
     // PIN: none set -> not required
@@ -745,7 +745,7 @@ async function cycleSpace(dom, A){
 
   console.log('--- Private spaces ---');
   {
-    DB.settings=[]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debts=[]; DB.debtPayments=[]; DB.snapshots=[];
+    DB.settings=[{key:'buffer', value:{name:'Nationwide Buffer', currency:'GBP', balance:0, entries:[]}}]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debts=[]; DB.debtPayments=[]; DB.snapshots=[];
     const reqs = [];
     const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
       beforeParse(w){
@@ -854,7 +854,7 @@ async function cycleSpace(dom, A){
 
   console.log('--- Business space ---');
   {
-    DB.settings=[]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debts=[]; DB.debtPayments=[]; DB.snapshots=[];
+    DB.settings=[{key:'buffer', value:{name:'Nationwide Buffer', currency:'GBP', balance:0, entries:[]}}]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debts=[]; DB.debtPayments=[]; DB.snapshots=[];
     const reqs=[];
     const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
       beforeParse(w){
@@ -916,7 +916,7 @@ async function cycleSpace(dom, A){
 
   console.log('--- TRJ Farms space ---');
   {
-    DB.settings=[]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[];
+    DB.settings=[{key:'buffer', value:{name:'Nationwide Buffer', currency:'GBP', balance:0, entries:[]}}]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[];
     const reqs=[];
     const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
       beforeParse(w){
@@ -964,7 +964,7 @@ async function cycleSpace(dom, A){
 
   console.log('--- Private space demands a PIN ---');
   {
-    DB.settings=[]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[];
+    DB.settings=[{key:'buffer', value:{name:'Nationwide Buffer', currency:'GBP', balance:0, entries:[]}}]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[];
     const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
       beforeParse(w){ w.fetch = mockFetch;
         w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}})); }});
@@ -1015,7 +1015,7 @@ async function cycleSpace(dom, A){
 
   console.log('--- PIN demanded on EVERY private entry; business/family/farm ungated ---');
   {
-    DB.settings=[]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[];
+    DB.settings=[{key:'buffer', value:{name:'Nationwide Buffer', currency:'GBP', balance:0, entries:[]}}]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[];
     const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
       beforeParse(w){ w.fetch = mockFetch;
         w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}})); }});
@@ -1137,7 +1137,7 @@ async function cycleSpace(dom, A){
 
   console.log('--- Space dropdown ---');
   {
-    DB.settings=[]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[];
+    DB.settings=[{key:'buffer', value:{name:'Nationwide Buffer', currency:'GBP', balance:0, entries:[]}}]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[];
     const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
       beforeParse(w){ w.fetch = mockFetch;
         w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}})); }});
@@ -1187,7 +1187,7 @@ async function cycleSpace(dom, A){
 
   console.log('--- Assets register ---');
   {
-    DB.settings=[]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[];
+    DB.settings=[{key:'buffer', value:{name:'Nationwide Buffer', currency:'GBP', balance:0, entries:[]}}]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[];
     DB.assets=[{id:'as1', name:'TRJ Farm land', category:'Land', owner_name:'TRJ Farms', currency:'USD', value:120000, valued_at:'2026-07-01', archived:false}];
     DB.debts=[{id:'d1', name:'Mortgage', debt_type:'loan', owner_name:'Family', principal:200000, balance:150000, currency:'GBP', interest_rate:5, min_payment:1200, asset_backed:true, asset_name:'House', asset_value:280000, archived:false}];
     const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
@@ -1235,7 +1235,7 @@ async function cycleSpace(dom, A){
 
   console.log('--- Debt linked to register asset (no double record) ---');
   {
-    DB.settings=[]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[];
+    DB.settings=[{key:'buffer', value:{name:'Nationwide Buffer', currency:'GBP', balance:0, entries:[]}}]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[];
     DB.assets=[{id:'as1', name:'House', category:'Property', owner_name:'Family', currency:'GBP', value:280000, valued_at:'2026-07-01', archived:false},
                {id:'as2', name:'Bakkie', category:'Vehicle', owner_name:'Family', currency:'USD', value:15000, valued_at:'2026-07-01', archived:false}];
     DB.debts=[{id:'d1', name:'Mortgage', debt_type:'loan', owner_name:'Family', principal:200000, balance:150000, currency:'GBP',
@@ -1292,7 +1292,7 @@ async function cycleSpace(dom, A){
 
   console.log('--- Asset classes ---');
   {
-    DB.settings=[]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[];
+    DB.settings=[{key:'buffer', value:{name:'Nationwide Buffer', currency:'GBP', balance:0, entries:[]}}]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[];
     DB.assets=[{id:'as1', name:'Herd', category:'Livestock', owner_name:'TRJ Farms', currency:'USD', value:8000, valued_at:'2026-07-01', archived:false},
                {id:'as2', name:'Feed stock', category:'Stock / inventory', owner_name:'TRJ Farms', currency:'USD', value:2000, valued_at:'2026-07-01', archived:false},
                {id:'as3', name:'Second herd', category:'Livestock', owner_name:'TRJ Farms', currency:'USD', value:4000, valued_at:'2026-07-01', archived:false}];
@@ -1332,7 +1332,7 @@ async function cycleSpace(dom, A){
 
   console.log('--- Payback planner ---');
   {
-    DB.settings=[]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[]; DB.assets=[];
+    DB.settings=[{key:'buffer', value:{name:'Nationwide Buffer', currency:'GBP', balance:0, entries:[]}}]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[]; DB.assets=[];
     DB.debts=[{id:'d1', name:'Barclaycard', debt_type:'credit_card', owner_name:'Rodney', principal:5000, balance:3000, currency:'GBP',
                interest_rate:24, min_payment:150, archived:false},
               {id:'d2', name:'Zero-rate loan', debt_type:'informal', owner_name:'Family', principal:1200, balance:1200, currency:'GBP',
@@ -1391,7 +1391,7 @@ async function cycleSpace(dom, A){
 
   console.log('--- Payback planner: debt free by a date ---');
   {
-    DB.settings=[]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[]; DB.assets=[];
+    DB.settings=[{key:'buffer', value:{name:'Nationwide Buffer', currency:'GBP', balance:0, entries:[]}}]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[]; DB.assets=[];
     DB.debts=[{id:'d1', name:'Barclaycard', debt_type:'credit_card', owner_name:'Rodney', principal:5000, balance:3000, currency:'GBP',
                interest_rate:24, min_payment:150, archived:false},
               {id:'d2', name:'Family loan', debt_type:'informal', owner_name:'Family', principal:1200, balance:1200, currency:'GBP',
@@ -1455,7 +1455,7 @@ async function cycleSpace(dom, A){
 
   console.log('--- Admin WhatsApp notification prefs ---');
   {
-    DB.settings=[]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[]; DB.assets=[]; DB.nprefs=[];
+    DB.settings=[{key:'buffer', value:{name:'Nationwide Buffer', currency:'GBP', balance:0, entries:[]}}]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[]; DB.assets=[]; DB.nprefs=[];
     const waCalls=[];
     const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
       beforeParse(w){
@@ -1491,7 +1491,7 @@ async function cycleSpace(dom, A){
 
   console.log('--- Backup export ---');
   {
-    DB.settings=[{key:'manual_rates', value:{ZWG:26}}]; DB.planner=[]; DB.income=[]; DB.accounts=[];
+    DB.settings=[{key:'buffer', value:{name:'Nationwide Buffer', currency:'GBP', balance:0, entries:[]}}]; DB.planner=[]; DB.income=[]; DB.accounts=[];
     DB.debts=[{id:'d1', name:'Mortgage', balance:1, principal:1, currency:'GBP', archived:false}];
     DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[]; DB.assets=[]; DB.nprefs=[];
     const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
@@ -1519,7 +1519,7 @@ async function cycleSpace(dom, A){
 
   console.log('--- Automatic backups list ---');
   {
-    DB.settings=[]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[]; DB.assets=[]; DB.nprefs=[];
+    DB.settings=[{key:'buffer', value:{name:'Nationwide Buffer', currency:'GBP', balance:0, entries:[]}}]; DB.planner=[]; DB.income=[]; DB.accounts=[]; DB.debts=[]; DB.debtPayments=[]; DB.snapshots=[]; DB.grants=[]; DB.assets=[]; DB.nprefs=[];
     DB.backupFiles=[{name:'backup-2026-07-19.json', metadata:{size:204800}},
                     {name:'backup-2026-07-18.json', metadata:{size:198000}},
                     {name:'.emptyFolderPlaceholder', metadata:{}}];
@@ -1855,6 +1855,28 @@ async function cycleSpace(dom, A){
     const nwT = d.getElementById('d-networth-top').textContent;
     assert(nwT.startsWith('$') && !nwT.includes('·'), 'net worth shown as one USD figure');
     assert(d.getElementById('d-debt-top').textContent.startsWith('$') || d.getElementById('d-debt-top').textContent === 'None', 'total debt as one USD figure');
+  }
+
+  console.log('--- USD/GBP focus + rate fallback ---');
+  {
+    const fmZ = fs.readFileSync(path.join(__dirname,'..','index.html'),'utf8');
+    assert(!fmZ.includes('ZWG'), 'ZWG removed from the app entirely');
+    assert(fmZ.includes("var CURRENCIES = ['USD','GBP']"), 'currency choices are USD and GBP only');
+    assert(fmZ.includes('FALLBACK_RATES'), 'built-in fallback rate present');
+    // With NO rates feed at all, a GBP buffer must still show a USD figure (not $0)
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){
+        w.fetch = (url, opts) => String(url).includes('frankfurter') ? Promise.reject(new TypeError('feed down')) : mockFetch(url, opts);
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}}));
+      }});
+    await wait(300);
+    const w2 = dom.window, d2 = w2.document;
+    w2.App.state.settings.buffer = {name:'Nationwide Buffer', currency:'GBP', balance:480, entries:[]};
+    w2.App.renderAll(); await wait(60);
+    const buf = d2.getElementById('d-buffer-top').textContent;
+    assert(buf.startsWith('$') && !buf.startsWith('$0'), 'GBP buffer converts via fallback when the feed is down (got ' + buf + ')');
+    const expected = Math.round(480/0.79);
+    assert(buf.replace(/[^0-9]/g,'') === String(expected), 'fallback conversion arithmetic correct');
   }
 
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');
