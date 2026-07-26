@@ -1,5 +1,5 @@
 /* Family Money service worker — bump CACHE on every deploy */
-var CACHE = 'family-money-v52';
+var CACHE = 'family-money-v53';
 var ASSETS = ['./', './index.html', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/crest-96.png'];
 
 self.addEventListener('install', function (e) {
@@ -14,6 +14,9 @@ self.addEventListener('activate', function (e) {
   );
 });
 
+// If the shell cannot be produced from network or cache, the install is wedged:
+// unregister so the next load fetches a clean copy straight from the network.
+self.addEventListener('message', function(e){ if(e.data === 'fm-unregister') self.registration.unregister(); });
 self.addEventListener('fetch', function (e) {
   if (e.request.method !== 'GET') return;
   var url = new URL(e.request.url);

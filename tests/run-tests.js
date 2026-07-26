@@ -1763,6 +1763,35 @@ async function cycleSpace(dom, A){
     assert(fmT.includes("if(sp === 'business' && !state.isAdmin) sp = 'family';"), 'space rights unchanged by the manager tier');
   }
 
+  console.log('--- Budgets tab, buffer and storage self-heal ---');
+  {
+    const fmB = fs.readFileSync(path.join(__dirname,'..','index.html'),'utf8');
+    assert(fmB.includes('data-view="budgets"') && fmB.includes('id="view-budgets"'), 'Budgets tab in the top menu');
+    assert(fmB.includes('function moveBuffer') && fmB.includes("key:'buffer'"), 'buffer add/remove persists without touching other records');
+    assert(fmB.includes('id="d-buffer"'), 'buffer figure on the dashboard');
+    assert(fmB.includes('Storage self-heal'), 'corrupt/oversized local cache purged on load');
+    assert(fmB.includes('payload.length > 300000'), 'oversized payloads never cached');
+
+    // behaviour: buffer moves, guards and dashboard figure
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){ w.fetch = mockFetch; w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}})); }});
+    await wait(300);
+    const d = dom.window.document, A = dom.window.App;
+    d.querySelector('#tabs button[data-view="budgets"]').click(); await wait(60);
+    d.getElementById('buf-amount').value = '500';
+    d.getElementById('buf-add').click(); await wait(150);
+    assert(A.state.settings.buffer && Number(A.state.settings.buffer.balance) === 500, 'money added to the buffer');
+    d.getElementById('buf-amount').value = '900';
+    d.getElementById('buf-take').click(); await wait(120);
+    assert(Number(A.state.settings.buffer.balance) === 500, 'cannot take out more than the buffer holds');
+    assert(d.getElementById('buf-err').style.display === '', 'over-withdrawal explained, not silently ignored');
+    d.getElementById('buf-amount').value = '200';
+    d.getElementById('buf-take').click(); await wait(150);
+    assert(Number(A.state.settings.buffer.balance) === 300, 'money taken out of the buffer');
+    assert(d.getElementById('buf-list').textContent.includes('Taken out'), 'movements listed');
+    assert(d.getElementById('d-buffer').textContent.includes('300'), 'dashboard shows the current buffer');
+  }
+
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

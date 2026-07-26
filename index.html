@@ -194,6 +194,33 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
   }
   window.__fmRecover = wipe;
 
+  // Storage self-heal: a corrupt or oversized local cache is the one piece of
+  // state incognito never has — and the usual reason a normal profile wedges
+  // while incognito works. Validate every cache entry on load and purge the
+  // whole cache if anything is unreadable or it has outgrown its budget.
+  try{
+    var CAP = 2 * 1024 * 1024, bytes = 0, bad = false, keys = [];
+    Object.keys(localStorage).forEach(function(k){
+      if(k.indexOf('fm-cache:') !== 0) return;
+      keys.push(k);
+      var v = localStorage.getItem(k) || '';
+      bytes += v.length;
+      try{ var o = JSON.parse(v); if(!o || typeof o !== 'object' || !('d' in o)) bad = true; }
+      catch(e){ bad = true; }
+    });
+    if(bad || bytes > CAP){
+      keys.forEach(function(k){ try{ localStorage.removeItem(k); }catch(e){} });
+      try{ localStorage.setItem('fm_cache_healed', new Date().toISOString()); }catch(e){}
+    }
+    // A session that cannot be parsed locks the app out of every screen.
+    var sraw = localStorage.getItem('fm_session');
+    if(sraw){ try{ var sp = JSON.parse(sraw); if(!sp || !sp.access_token) throw 0; }
+      catch(e){ localStorage.removeItem('fm_session'); } }
+  }catch(e){
+    // localStorage itself is unusable (quota, or blocked): clear what we can.
+    try{ localStorage.clear(); }catch(e2){}
+  }
+
   // Escape hatch: money.forgiatus.com/?reset=1 recovers a wedged install.
   if(location.search.indexOf('reset=1') > -1){
     wipe(true).then(function(){ location.replace(location.pathname); });
@@ -289,6 +316,7 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
     <button data-view="dashboard" class="active">Dashboard</button>
     <button data-view="bills">Bills</button>
     <button data-view="income">Income</button>
+    <button data-view="budgets">Budgets</button>
     <button data-view="expenses">Expenses</button>
     <button data-view="planner">Planner</button>
     <button data-view="assets">Assets</button>
@@ -317,6 +345,11 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
     <div class="panel">
       <h2>Debt payback — tracking over time</h2>
       <div id="nw-series"></div>
+    </div>
+    <div class="panel" id="d-buffer-panel">
+      <div class="row"><h2>Buffer — rainy day fund</h2><button class="btn sm" data-goview="budgets">Manage</button></div>
+      <div style="font-size:26px;font-weight:700;font-family:var(--mono,monospace);color:var(--green)" id="d-buffer">—</div>
+      <div class="small muted" id="d-buffer-sub"></div>
     </div>
     <div class="panel">
       <div class="row"><h2>Due this week &amp; overdue</h2><span class="eyebrow" id="d-today2"></span></div>
@@ -395,6 +428,29 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
     <div class="panel">
       <h2>Recently received</h2>
       <div id="income-received-list"><div class="empty">Loading…</div></div>
+    </div>
+  </section>
+  <section id="view-budgets" style="display:none">
+    <div class="panel" id="buffer-panel">
+      <div class="row"><h2>Buffer — rainy day fund</h2><span class="badge brass" id="buf-name">Nationwide Buffer</span></div>
+      <p class="small muted" style="margin-top:0">A standalone pot. Money in and out is recorded here only — it is not reconciled against bills, expenses or accounts. The figure is simply what is left.</p>
+      <div style="font-size:30px;font-weight:700;font-family:var(--mono,monospace);margin:6px 0" id="buf-balance">—</div>
+      <div class="inline2" style="margin-top:6px">
+        <input id="buf-amount" type="number" step="0.01" inputmode="decimal" placeholder="Amount">
+        <input id="buf-note" placeholder="Note (optional)">
+      </div>
+      <div class="btnrow" style="justify-content:flex-start">
+        <button class="btn primary" id="buf-add">Add to buffer</button>
+        <button class="btn" id="buf-take">Take out</button>
+      </div>
+      <div id="buf-err" class="small" style="color:var(--red);display:none"></div>
+      <div class="wsec" style="margin-top:12px">Recent movements</div>
+      <div id="buf-list"><div class="empty">No movements yet.</div></div>
+    </div>
+    <div class="panel">
+      <div class="row"><h2>Budgets this month</h2><button class="btn" id="bud-add-btn2">Add budget</button></div>
+      <p class="small muted" style="margin-top:0">Set a monthly figure per category; the bar shows what has actually been spent against it this month.</p>
+      <div id="bud-track"></div>
     </div>
   </section>
   <section id="view-expenses" style="display:none">
@@ -1443,7 +1499,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v52';
+  var APP_BUILD = 'v53';
   try{ window.APP_BUILD_PUBLIC = APP_BUILD; }catch(e){}
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
@@ -1455,7 +1511,21 @@ var App = (function(){
   var OFFLINE = {active:false};
   function isNetErr(e){ return e && (e.name === 'TypeError' || e.name === 'AbortError' || /fetch|network|abort/i.test(e.message || '')); }
   function cacheUid(){ return (state.session && state.session.user && state.session.user.id) || 'anon'; }
-  function cachePut(path, data){ try{ localStorage.setItem('fm-cache:' + cacheUid() + ':' + path, JSON.stringify({t:Date.now(), d:data})); }catch(e){} }
+  function cachePut(path, data){
+    try{
+      var payload = JSON.stringify({t:Date.now(), d:data});
+      if(payload.length > 300000) return; // never cache a payload big enough to fill the store
+      localStorage.setItem('fm-cache:' + cacheUid() + ':' + path, payload);
+    }catch(e){
+      // Quota reached: drop the oldest half of this user's cache and move on.
+      try{
+        var mine = Object.keys(localStorage).filter(function(k){ return k.indexOf('fm-cache:' + cacheUid() + ':') === 0; })
+          .map(function(k){ var t = 0; try{ t = (JSON.parse(localStorage.getItem(k)||'{}').t)||0; }catch(e2){}; return {k:k, t:t}; })
+          .sort(function(a,b){ return a.t - b.t; });
+        mine.slice(0, Math.ceil(mine.length/2)).forEach(function(x){ localStorage.removeItem(x.k); });
+      }catch(e3){}
+    }
+  }
   function cacheGet(path){ try{ var v = localStorage.getItem('fm-cache:' + cacheUid() + ':' + path); return v ? JSON.parse(v) : null; }catch(e){ return null; } }
   function outbox(){ try{ return JSON.parse(localStorage.getItem('fm-outbox:' + cacheUid()) || '[]'); }catch(e){ return []; } }
   function outboxSave(q){ try{ localStorage.setItem('fm-outbox:' + cacheUid(), JSON.stringify(q)); }catch(e){} offlineBadge(); }
@@ -1851,6 +1921,57 @@ var App = (function(){
       '</div></div>' +
       '<div class="amount' + (st === 'overdue' ? ' overdue' : ' in') + '">' + esc(fmtMoney(i.amount, i.currency)) + '</div></div>';
   }
+  function bufferData(){
+    var b = (state.settings && state.settings.buffer) || {};
+    return {name: b.name || 'Nationwide Buffer', currency: b.currency || 'GBP', balance: Number(b.balance || 0), entries: b.entries || []};
+  }
+  function saveBuffer(next){
+    return apiJSON('/rest/v1/fam_settings?on_conflict=key', {method:'POST',
+      headers:{'Prefer':'return=minimal,resolution=merge-duplicates'},
+      body:JSON.stringify({key:'buffer', value:next, updated_by:state.session.user.id, updated_at:new Date().toISOString()})})
+      .then(function(){ state.settings.buffer = next; });
+  }
+  function moveBuffer(sign){
+    var amt = parseFloat($('buf-amount').value), err = $('buf-err');
+    err.style.display = 'none';
+    if(!(amt > 0)){ err.textContent = 'Enter an amount.'; err.style.display = ''; return; }
+    var b = bufferData();
+    if(sign < 0 && amt > b.balance){ err.textContent = 'Only ' + fmtMoney(b.balance, b.currency) + ' is in the buffer.'; err.style.display = ''; return; }
+    var next = {name:b.name, currency:b.currency, balance: Math.round((b.balance + sign*amt) * 100)/100,
+      entries: [{d:todayISO(), a:sign*amt, n:($('buf-note').value.trim() || null), by:state.session.user.id}].concat(b.entries).slice(0, 60)};
+    saveBuffer(next).then(function(){
+      $('buf-amount').value = ''; $('buf-note').value = '';
+      toast(sign > 0 ? 'Added to the buffer.' : 'Taken out of the buffer.');
+      renderBudgets(); renderDashboard();
+    }).catch(function(e){ err.textContent = e.message; err.style.display = ''; });
+  }
+  function renderBudgets(){
+    var b = bufferData();
+    if($('buf-name')) $('buf-name').textContent = b.name;
+    if($('buf-balance')) $('buf-balance').innerHTML = '<span style="color:var(--green)">' + esc(fmtMoney(b.balance, b.currency)) + '</span>';
+    if($('buf-list')) $('buf-list').innerHTML = b.entries.length ? b.entries.map(function(e){
+      var inn = Number(e.a) > 0;
+      return '<div class="item"><div><strong>' + (inn ? 'Added' : 'Taken out') + '</strong>' +
+        '<div class="small muted">' + esc(fmtDate(e.d)) + (e.n ? ' \u00b7 ' + esc(e.n) : '') + ' \u00b7 ' + esc(memberName(e.by)) + '</div></div>' +
+        '<div class="amount" style="color:' + (inn ? 'var(--green)' : 'var(--red)') + '">' + (inn ? '+' : '\u2212') + esc(fmtMoney(Math.abs(e.a), b.currency)) + '</div></div>';
+    }).join('') : '<div class="empty">No movements yet.</div>';
+
+    var el = $('bud-track'); if(!el) return;
+    var thisM = todayISO().slice(0,7), actual = {};
+    state.expenses.forEach(function(x){ if(x.spent_at.slice(0,7) === thisM){ var k = x.category + '|' + x.currency; actual[k] = (actual[k]||0) + Number(x.amount); } });
+    el.innerHTML = state.budgets.length ? state.budgets.map(function(bg){
+      var spent = actual[bg.category + '|' + bg.currency] || 0, limit = Number(bg.amount) || 0;
+      var pct = limit > 0 ? Math.min(200, Math.round(100*spent/limit)) : 0;
+      var over = spent > limit, left = limit - spent;
+      var col = over ? 'var(--red)' : pct > 80 ? 'var(--brass)' : 'var(--green)';
+      return '<div style="margin:12px 0 14px"><div class="row" style="margin-bottom:4px">' +
+        '<strong>' + esc(bg.category) + '</strong>' +
+        '<span class="small" style="color:' + col + '">' + esc(fmtMoney(Math.abs(left), bg.currency)) + (over ? ' over' : ' left') + '</span></div>' +
+        '<div style="height:8px;background:var(--panel2);border-radius:5px;overflow:hidden">' +
+          '<div style="height:100%;width:' + Math.min(100,pct) + '%;background:' + col + '"></div></div>' +
+        '<div class="small muted" style="margin-top:3px">' + esc(fmtMoney(spent, bg.currency)) + ' of ' + esc(fmtMoney(limit, bg.currency)) + ' \u00b7 ' + pct + '%</div></div>';
+    }).join('') : '<div class="empty">No budgets set yet — add one to start tracking.</div>';
+  }
   function renderIncome(){
     var el = $('income-list'); if(!el) return;
     var rows = (state.incomeAll || []).filter(function(i){ return !i.received_at; });
@@ -2016,7 +2137,7 @@ var App = (function(){
 
   function setView(v){
     state.view = v;
-    ['dashboard','bills','income','expenses','planner','assets','debts','analysis','admin'].forEach(function(name){
+    ['dashboard','bills','income','budgets','expenses','planner','assets','debts','analysis','admin'].forEach(function(name){
       $('view-' + name).style.display = (name === v && state.isMember) ? '' : 'none';
     });
     document.querySelectorAll('#tabs button').forEach(function(b){
@@ -2114,6 +2235,11 @@ var App = (function(){
 
   function renderDashboard(){
     $('d-today').textContent = fmtDate(todayISO());
+    if($('d-buffer')){
+      var bf = bufferData();
+      $('d-buffer').textContent = fmtMoney(bf.balance, bf.currency);
+      $('d-buffer-sub').textContent = bf.name + (bf.entries.length ? ' \u00b7 last movement ' + fmtDate(bf.entries[0].d) : ' \u00b7 no movements yet');
+    }
     if($('d-today2')) $('d-today2').textContent = '';
 
     // Due this week & overdue
@@ -3612,7 +3738,7 @@ var App = (function(){
     var p = state.editingBudget
       ? apiJSON('/rest/v1/fam_budgets?id=eq.' + state.editingBudget.id, {method:'PATCH', body:JSON.stringify(body)})
       : apiJSON('/rest/v1/fam_budgets', {method:'POST', headers:{'Prefer':'return=minimal'}, body:JSON.stringify(spaceBody(body))});
-    p.then(function(){ modalClose('bud-modal'); return loadBudgets().then(function(){ renderAdmin(); renderAnalysis(); }); })
+    p.then(function(){ modalClose('bud-modal'); return loadBudgets().then(function(){ renderAdmin(); renderAnalysis(); renderBudgets(); }); })
      .catch(function(e){ errEl.textContent = e.message; errEl.style.display=''; });
   }
 
@@ -3854,7 +3980,7 @@ var App = (function(){
 
   function renderAll(){
     renderNetWorth();
-    renderBills(); renderPayments(); renderExpenses(); renderIncome(); renderDashboard(); renderPlanner();
+    renderBills(); renderPayments(); renderExpenses(); renderIncome(); renderBudgets(); renderDashboard(); renderPlanner();
     renderDebts(); renderDebtPayments(); renderNetPosition(); renderAnalysis(); renderAdmin(); renderAssets(); fillPaybackSelect(); if(state.ppMode === 'date') renderPaybackDate();
     fillAccountSelects(); setupNotifCard();
   }
@@ -4051,6 +4177,10 @@ var App = (function(){
     $('bm-save').addEventListener('click', saveBill);
     $('pm-save').addEventListener('click', confirmPaid);
     $('rm-save').addEventListener('click', confirmReceived);
+    document.querySelectorAll('[data-goview]').forEach(function(b){ b.addEventListener('click', function(){ setView(b.getAttribute('data-goview')); }); });
+    if($('buf-add')) $('buf-add').addEventListener('click', function(){ moveBuffer(1); });
+    if($('buf-take')) $('buf-take').addEventListener('click', function(){ moveBuffer(-1); });
+    if($('bud-add-btn2')) $('bud-add-btn2').addEventListener('click', function(){ openBudModal(null); });
     document.querySelector('main').addEventListener('change', function(e){
       var sel = e.target.closest('[data-act="memrole"]'); if(!sel) return;
       var uid = sel.getAttribute('data-id'), role = sel.value;
@@ -4329,7 +4459,7 @@ var App = (function(){
     $('bud-del').addEventListener('click', function(){
       var b = state.editingBudget; if(!b) return;
       apiJSON('/rest/v1/fam_budgets?id=eq.' + b.id, {method:'DELETE'})
-        .then(function(){ modalClose('bud-modal'); return loadBudgets().then(function(){ renderAdmin(); renderAnalysis(); }); })
+        .then(function(){ modalClose('bud-modal'); return loadBudgets().then(function(){ renderAdmin(); renderAnalysis(); renderBudgets(); }); })
         .catch(function(e){ toast(e.message); });
     });
     $('ad-mem-add').addEventListener('click', addMemberByEmail);
