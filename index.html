@@ -1058,9 +1058,9 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
         <input id="dm-rate" type="number" inputmode="decimal" step="0.1" min="0" value="0"></div>
     </div>
     <div class="inline2">
-      <div><label class="f" for="dm-minpay">Monthly payment</label>
+      <div><label class="f" for="dm-minpay">Repayment amount (monthly)</label>
         <input id="dm-minpay" type="number" inputmode="decimal" step="0.01" min="0"></div>
-      <div><label class="f" for="dm-dueday">Due day of month</label>
+      <div><label class="f" for="dm-dueday">Repayment day of month</label>
         <input id="dm-dueday" type="number" inputmode="numeric" min="1" max="31"></div>
     </div>
     <label class="f" for="dm-account">Linked account</label>
@@ -1340,6 +1340,53 @@ var App = (function(){
     var d = i.on_date || i.week_date;
     return !!d && d < todayISO();
   }
+  // ---- Scheduled debt repayments ----
+  // A debt with a repayment day (and an open balance) is due on that day every
+  // month. These are derived, not stored: the projection is suppressed for a
+  // week as soon as a real payment or a planned item covers that debt, so the
+  // board never counts the same repayment twice.
+  function debtDueDateInMonth(d, ym){
+    if(!d || d.archived || !Number(d.due_day) || !(Number(d.balance) > 0)) return null;
+    var y = +ym.slice(0,4), m = +ym.slice(5,7);
+    var last = new Date(y, m, 0).getDate();
+    return ym + '-' + String(Math.min(Number(d.due_day), last)).padStart(2,'0');
+  }
+  function debtDueDatesInWeek(d, weekISO){
+    if(!d || d.archived || !Number(d.due_day) || !(Number(d.balance) > 0)) return [];
+    var end = new Date(weekISO + 'T00:00:00'), months = {}, out = [];
+    for(var k = 0; k <= 6; k++){
+      var t = new Date(end); t.setDate(t.getDate() - k);
+      months[t.getFullYear() + '-' + String(t.getMonth()+1).padStart(2,'0')] = 1;
+    }
+    Object.keys(months).forEach(function(ym){
+      var iso = debtDueDateInMonth(d, ym);
+      if(iso && fridayOf(iso) === weekISO) out.push(iso);
+    });
+    out.sort();
+    return out;
+  }
+  function debtDueCovered(d, weekISO, payments, items){
+    var paid = (payments || []).some(function(p){
+      return p.debt_id === d.id && p.kind !== 'borrow' && p.paid_at && fridayOf(String(p.paid_at).slice(0,10)) === weekISO;
+    });
+    if(paid) return true;
+    return (items || []).some(function(i){ return i.debt_id === d.id && i.week_date === weekISO; });
+  }
+  // Every scheduled repayment landing in one planner week, already de-duplicated.
+  function debtDueList(weekISO, debts, payments, items){
+    debts = debts || state.debts; payments = payments || state.debtPayments; items = items || state.planItems;
+    var out = [];
+    (debts || []).forEach(function(d){
+      var dates = debtDueDatesInWeek(d, weekISO);
+      if(!dates.length || debtDueCovered(d, weekISO, payments, items)) return;
+      dates.forEach(function(iso){
+        out.push({id:d.id, name:d.name, date:iso, amount:Number(d.min_payment) || 0, currency:d.currency});
+      });
+    });
+    out.sort(function(a,b){ return a.date.localeCompare(b.date); });
+    return out;
+  }
+
   function weekTotals(weekISO, income, items, bills){
     var out = {}, inc = {};
     items.forEach(function(it){ if(it.week_date === weekISO) out[it.currency] = (out[it.currency]||0) + Number(it.amount); });
@@ -1578,7 +1625,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v62';
+  var APP_BUILD = 'v63';
   try{ window.APP_BUILD_PUBLIC = APP_BUILD; }catch(e){}
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
@@ -2495,6 +2542,7 @@ var App = (function(){
       var pw = addWeeksISO(weeks[0], -pc);
       var pt = weekTotals(pw, state.income, state.planItems, state.bills);
       state.debtPayments.forEach(function(p){ if(p.kind !== 'borrow' && p.paid_at && fridayOf(p.paid_at.slice(0,10)) === pw){ pt.out[p.currency] = (pt.out[p.currency]||0) + Number(p.amount); } });
+      debtDueList(pw).forEach(function(x){ if(x.amount > 0) pt.out[x.currency] = (pt.out[x.currency]||0) + x.amount; });
       runningCarry += totalGBP(pt.inc) - totalGBP(pt.out);
     }
     board.innerHTML = weeks.map(function(w){
@@ -2518,6 +2566,20 @@ var App = (function(){
           '<div class="crow"><span class="ctitle">' + esc(p.debt_name) + ' <span class="badge debt">debt payment</span></span>' +
           '<span class="amount">' + esc(fmtMoney(p.amount, p.currency)) + '</span></div>' +
           '<div class="cactions"><span class="small muted">paid ' + esc(fmtShort(p.paid_at.slice(0,10))) + (p.note ? ' · ' + esc(p.note) : '') + '</span><button class="linkbtn" data-act="dpundo" data-id="' + esc(p.id) + '">Undo</button></div></div>';
+      }).join('');
+      var dueCards = debtDueList(w).map(function(x){
+        var od = x.date < todayISO();
+        if(x.amount > 0){
+          t.out[x.currency] = (t.out[x.currency]||0) + x.amount;
+          t.rem[x.currency] = (t.rem[x.currency]||0) - x.amount;
+        }
+        return '<div class="card debtplan' + (od ? ' od' : '') + '" data-duedebt="' + esc(x.id) + '">' +
+          '<div class="crow"><span class="ctitle">' + (od ? '<span class="badge od">DUE</span> ' : '') + esc(x.name) +
+          ' <span class="badge debt">repayment due</span></span>' +
+          '<span class="amount' + (od ? ' overdue' : '') + '">' + (x.amount > 0 ? esc(fmtMoney(x.amount, x.currency)) : '\u2014') + '</span></div>' +
+          '<div class="cactions"><span class="small ' + (od ? 'red' : 'muted') + '">' + (od ? 'was due ' : 'due ') + esc(fmtShort(x.date)) +
+          (x.amount > 0 ? '' : ' \u00b7 no repayment amount set') + '</span>' +
+          '<button class="linkbtn" data-act="ddue" data-id="' + esc(x.id) + '" data-date="' + esc(x.date) + '">Record</button></div></div>';
       }).join('');
       var itemCards = state.planItems.filter(function(i){ return i.week_date === w; }).map(function(i){
         var ilap = itemLapsed(i);
@@ -2557,7 +2619,7 @@ var App = (function(){
         '<div class="whead"><span>' + esc(fmtShort(w)) + (isNow ? ' <span class="badge brass">this week</span>' : '') + '</span><span class="muted small">wk</span></div>' +
         '<div class="wsec">Money in</div>' + (incCards || '') +
         '<button class="addmini" data-act="addinc" data-week="' + esc(w) + '">+ income</button>' +
-        '<div class="wsec">Out</div>' + rolledCards + (billCards + itemCards + debtCards || '') +
+        '<div class="wsec">Out</div>' + rolledCards + (billCards + dueCards + itemCards + debtCards || '') +
         '<button class="addmini" data-act="additem" data-week="' + esc(w) + '">+ item</button>' +
         '<button class="addmini" data-act="adddebtpay" data-week="' + esc(w) + '">+ debt payment</button>' +
         (function(){
@@ -2619,6 +2681,12 @@ var App = (function(){
     state.income.forEach(function(i){ bump(i.on_date || i.week_date, i.currency, Number(i.amount)); });
     state.planItems.forEach(function(it){ bump(it.on_date || it.week_date, it.currency, -Number(it.amount)); });
     state.bills.forEach(function(b){ if(!b.archived) bump(b.due_date, b.currency, -Number(b.amount)); });
+    state.debts.forEach(function(d){
+      var iso = debtDueDateInMonth(d, ym);
+      if(!iso || !(Number(d.min_payment) > 0)) return;
+      if(debtDueCovered(d, fridayOf(iso), state.debtPayments, state.planItems)) return;
+      bump(iso, d.currency, -Number(d.min_payment));
+    });
     return flows;
   }
   function renderCalendar(){
@@ -2653,6 +2721,10 @@ var App = (function(){
     state.bills.forEach(function(b){ if(!b.archived && b.due_date === iso) rows.push({t:'Bill due', name:b.name, amt:-Number(b.amount), ccy:b.currency, edit:{kind:'bill', id:b.id}}); });
     state.income.forEach(function(i){ if((i.on_date || '') === iso) rows.push({t:'Income', cls:'in', name:i.person, amt:Number(i.amount), ccy:i.currency, edit:{kind:'income', id:i.id}}); });
     state.planItems.forEach(function(it){ if((it.on_date || '') === iso) rows.push({t:it.paid ? 'Item · paid' : 'Item', name:it.title, amt:-Number(it.amount), ccy:it.currency, edit:{kind:'item', id:it.id}}); });
+    debtDueList(fridayOf(iso)).forEach(function(x){
+      if(x.date !== iso) return;
+      rows.push({t:(iso < todayISO() ? 'Debt repayment due · overdue' : 'Debt repayment due'), name:x.name, amt:-x.amount, ccy:x.currency, edit:{kind:'debtdue', id:x.id}});
+    });
     // week-anchored entries surface on their Friday
     if(fridayOf(iso) === iso){
       state.income.forEach(function(i){ if(!i.on_date && i.week_date === iso) rows.push({t:'Income (week)', cls:'in', name:i.person, amt:Number(i.amount), ccy:i.currency, edit:{kind:'income', id:i.id}}); });
@@ -3267,7 +3339,7 @@ var App = (function(){
           (proj === null && Number(d.min_payment) > 0 && Number(d.balance) > 0 ? '<span class="badge red">Growing</span>' : '') + '</div>' +
         '<div class="small muted">' + esc(d.owner_name) + (d.lender ? ' · ' + esc(d.lender) : '') +
           (Number(d.interest_rate) ? ' · ' + esc(String(d.interest_rate)) + '% APR' : '') +
-          (d.due_day ? ' · due day ' + esc(String(d.due_day)) : '') + '</div>' +
+          (d.due_day ? ' · next repayment ' + esc(fmtShort(nextDueFromDay(d.due_day))) + (Number(d.min_payment) > 0 ? ' · ' + esc(fmtMoney(d.min_payment, d.currency)) + ' — on the planner' : ' — set a repayment amount to show it on the planner') : '') + '</div>' +
         '<div class="small muted">' + esc(projTxt) + '</div>' +
         (eq ? '<div class="small" style="color:var(--green)">' + esc(eq.name) + (ai && ai.linked ? ' (register)' : '') + ' equity: ' + esc(fmtMoney(eq.equity, eq.currency)) + ' of ' + esc(fmtMoney(eq.value, eq.currency)) + '</div>' : (ai && ai.value != null ? '<div class="small muted">' + esc(ai.name) + ' valued ' + esc(fmtMoney(ai.value, ai.currency)) + ' (different currency to the debt)</div>' : '')) +
         '<div class="list-actions">' +
@@ -3515,7 +3587,7 @@ var App = (function(){
      .catch(function(e){ errEl.textContent = e.message; errEl.style.display=''; });
   }
 
-  function openDebtPayModal(d, weekISO, presetKind){
+  function openDebtPayModal(d, weekISO, presetKind, dateISO){
     state.payingDebt = d;
     fillAccountSelects();
     $('dp-debt-wrap').style.display = 'none';
@@ -3524,7 +3596,7 @@ var App = (function(){
     var isB = state.dpKind === 'borrow';
     $('dp-kind-pay').classList.toggle('primary', !isB); $('dp-kind-borrow').classList.toggle('primary', isB);
     $('dp-save').textContent = isB ? 'Record borrowing' : 'Record payment';
-    $('dp-date').value = (weekISO && weekISO < todayISO()) ? weekISO : todayISO();
+    $('dp-date').value = dateISO || ((weekISO && weekISO < todayISO()) ? weekISO : todayISO());
     $('dp-name').textContent = d.name + ' — balance ' + fmtMoney(d.balance, d.currency);
     $('dp-amount').value = d.min_payment || '';
     $('dp-currency').value = d.currency;
@@ -4432,6 +4504,10 @@ var App = (function(){
       var b = e.target.closest('[data-dayedit]'); if(!b) return;
       var parts = b.getAttribute('data-dayedit').split(':'), kind = parts[0], id = parts[1];
       if(kind === 'bill') openBillModal(state.bills.find(function(x){ return x.id === id; }));
+      else if(kind === 'debtdue'){
+        var dbt = state.debts.find(function(x){ return x.id === id; });
+        if(dbt) openDebtPayModal(dbt, null, 'payment', state.plDay || todayISO());
+      }
       else if(kind === 'income') openIncomeModal(state.income.find(function(x){ return x.id === id; }));
       else openItemModal(state.planItems.find(function(x){ return x.id === id; }));
     });
@@ -4507,6 +4583,11 @@ var App = (function(){
         if(act === 'additem'){ openItemModal(null, b.getAttribute('data-week')); return; }
         if(act === 'adddebtpay'){ openDebtPayFromPlanner(b.getAttribute('data-week')); return; }
         if(act === 'dpundo'){ undoDebtPayment(b.getAttribute('data-id')); return; }
+        if(act === 'ddue'){
+          var dd0 = state.debts.find(function(x){ return x.id === b.getAttribute('data-id'); });
+          if(dd0) openDebtPayModal(dd0, null, 'payment', b.getAttribute('data-date'));
+          return;
+        }
         if(act === 'addinc'){ openIncomeModal(null, b.getAttribute('data-week')); return; }
         if(act === 'ptick'){
           var id = b.getAttribute('data-id');
@@ -4836,6 +4917,7 @@ var App = (function(){
     privateUnlocked:privateUnlocked, requirePrivatePin:requirePrivatePin, requireSpacePin:requireSpacePin, savePinSetting:savePinSetting, materialiseIncome:materialiseIncome,
     currentSpace:currentSpace, spaceFilter:spaceFilter, spaceBody:spaceBody, setSpace:setSpace, switchSpace:switchSpace, goToSpace:goToSpace, moveSpace:moveSpace,
     parseCSV:parseCSV, detectRecurring:detectRecurring, nextDueFromDay:nextDueFromDay,
+    debtDueList:debtDueList, debtDueDatesInWeek:debtDueDatesInWeek, debtDueDateInMonth:debtDueDateInMonth,
     calendarFlows:calendarFlows, renderCalendar:renderCalendar, setPlannerMode:setPlannerMode, spaceLabel:spaceLabel,
     nextOnDate:nextOnDate, renderDay:renderDay,
     loadGrants:loadGrants, loadNotifyPrefs:loadNotifyPrefs, exportBackup:exportBackup, BACKUP_TABLES:BACKUP_TABLES, renderBackupList:renderBackupList,

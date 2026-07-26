@@ -1965,6 +1965,97 @@ async function cycleSpace(dom, A){
     assert(d.getElementById('fx-err').style.display === '' && d.getElementById('fx-err').textContent.includes('promotional'), 'promo-rate entries rejected with an explanation');
   }
 
+  console.log('--- Scheduled debt repayments on the planner ---');
+  {
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){
+        w.fetch = function(url, opts){
+          opts = opts || {};
+          if(url.includes('/rest/v1/fam_planner_items') && (opts.method||'GET')==='GET')
+            return Promise.resolve({ok:true,status:200,text:()=>Promise.resolve(JSON.stringify(DB.planner)),json:()=>Promise.resolve(DB.planner)});
+          return mockFetch(url, opts);
+        };
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}}));
+      }});
+    await wait(150);
+    const d = dom.window.document, A = dom.window.App;
+    const weeks0 = A.weeksWindow(A.currentFriday(), 4);
+    // A repayment day inside the second visible week, so the card is future-dated
+    const target = weeks0[1];
+    const dueDay = parseInt(target.slice(8,10), 10);
+    DB.debts = [
+      {id:'dq1', name:'Barclaycard', balance:3472, currency:'GBP', min_payment:96.45, due_day:dueDay, archived:false, owner_name:'Rodney'},
+      {id:'dq2', name:'No amount set', balance:1000, currency:'GBP', min_payment:0, due_day:dueDay, archived:false, owner_name:'Rodney'},
+      {id:'dq3', name:'Cleared', balance:0, currency:'GBP', min_payment:50, due_day:dueDay, archived:false, owner_name:'Rodney'},
+      {id:'dq4', name:'No day set', balance:900, currency:'GBP', min_payment:40, due_day:null, archived:false, owner_name:'Rodney'}
+    ];
+    DB.debtPayments = []; DB.planner = []; DB.income = [];
+    await A.boot(); await wait(120);
+    d.querySelector('#tabs button[data-view="planner"]').click(); await wait(40);
+
+    // Pure helper behaviour
+    assert(A.debtDueDateInMonth(DB.debts[0], target.slice(0,7)) === target.slice(0,8) + String(dueDay).padStart(2,'0'), 'repayment date derived from the repayment day');
+    assert(A.debtDueDateInMonth({id:'x', balance:5000, currency:'GBP', min_payment:10, due_day:31, archived:false}, '2026-02') === '2026-02-28', 'day 31 clamps to the end of a short month');
+    assert(A.debtDueDatesInWeek(DB.debts[0], target).length === 1, 'the repayment lands in the week containing its date');
+    assert(A.debtDueDatesInWeek(DB.debts[0], weeks0[2]).length === 0, 'and in no other week');
+    assert(A.debtDueList(target).length === 2, 'only debts with a repayment day and an open balance project');
+    assert(!A.debtDueList(target).some(x => x.id === 'dq3'), 'a cleared debt projects nothing');
+    assert(!A.debtDueList(target).some(x => x.id === 'dq4'), 'a debt without a repayment day projects nothing');
+
+    // Board card
+    const col = d.querySelector('#pl-board .wcol[data-week="' + target + '"]');
+    assert(col && col.innerHTML.includes('repayment due'), 'repayment due card on the board');
+    assert(col.innerHTML.includes('Barclaycard') && col.innerHTML.includes('£96.45'), 'card shows the debt and its repayment amount');
+    assert(col.innerHTML.includes(A.esc(dueDay + ' ')) || col.innerHTML.includes('due '), 'card states the date it is due');
+    assert(col.innerHTML.includes('no repayment amount set'), 'a debt with no amount still shows, flagged');
+    const outRow = Array.from(col.querySelectorAll('.frow')).find(r => r.textContent.includes('Out'));
+    assert(outRow && outRow.textContent.includes('96.45'), 'the scheduled repayment counts in the week Out total');
+
+    // Recording from the card prefills debt, amount and the due date
+    const recBtn = col.querySelector('button[data-act="ddue"][data-id="dq1"]');
+    assert(recBtn, 'card offers Record');
+    recBtn.click(); await wait(60);
+    assert(d.getElementById('dp-date').value === recBtn.getAttribute('data-date'), 'payment form opens on the due date');
+    assert(parseFloat(d.getElementById('dp-amount').value) === 96.45, 'payment form prefilled with the repayment amount');
+    d.getElementById('dp-save').click(); await wait(200);
+    assert(DB.debtPayments.length === 1, 'payment recorded from the due card');
+    const colAfter = d.querySelector('#pl-board .wcol[data-week="' + target + '"]');
+    assert(!colAfter.querySelector('button[data-act="ddue"][data-id="dq1"]'), 'projection disappears once the repayment is paid');
+    assert(colAfter.innerHTML.includes('debt payment'), 'the real payment card takes its place');
+    const outRow2 = Array.from(colAfter.querySelectorAll('.frow')).find(r => r.textContent.includes('Out'));
+    assert(outRow2 && !/96\.45.*96\.45/.test(outRow2.textContent), 'the repayment is not counted twice');
+
+    // A planned item for the debt also suppresses the projection
+    DB.debtPayments = [];
+    DB.planner = [{id:'plq', title:'Debt · Barclaycard', amount:96.45, currency:'GBP', week_date:target, on_date:target, debt_id:'dq1', paid:false, recurrence:'none'}];
+    await A.boot(); await wait(120);
+    d.querySelector('#tabs button[data-view="planner"]').click(); await wait(40);
+    const colP = d.querySelector('#pl-board .wcol[data-week="' + target + '"]');
+    assert(!colP.querySelector('button[data-act="ddue"][data-id="dq1"]'), 'a planned payment suppresses the projection');
+
+    // Overdue treatment for a repayment date already past
+    DB.planner = [];
+    const pastDay = parseInt(A.addWeeksISO(A.currentFriday(), -1).slice(8,10), 10);
+    DB.debts = [{id:'dq5', name:'Marbles', balance:1168.35, currency:'GBP', min_payment:65.21, due_day:pastDay, archived:false, owner_name:'Rodney'}];
+    await A.boot(); await wait(120);
+    d.querySelector('#tabs button[data-view="planner"]').click(); await wait(40);
+    const dueIso = A.debtDueList(A.fridayOf(A.addWeeksISO(A.currentFriday(), -1)));
+    assert(A.debtDueDatesInWeek(DB.debts[0], A.addWeeksISO(A.currentFriday(), -1)).length === 1, 'a past repayment date still resolves to its own week');
+
+    // Day view and calendar carry the same date
+    DB.debts = [{id:'dq6', name:'Barclaycard', balance:3472, currency:'GBP', min_payment:96.45, due_day:dueDay, archived:false, owner_name:'Rodney'}];
+    await A.boot(); await wait(120);
+    d.querySelector('#tabs button[data-view="planner"]').click(); await wait(40);
+    const dueDate = target.slice(0,8) + String(dueDay).padStart(2,'0');
+    A.state.plDay = dueDate; A.setPlannerMode('day'); await wait(40);
+    assert(d.getElementById('day-list').innerHTML.includes('Debt repayment due'), 'day view lists the repayment on its date');
+    assert(d.getElementById('day-list').innerHTML.includes('Barclaycard'), 'day view names the debt');
+    const flows = A.calendarFlows(target.slice(0,7));
+    assert(flows[dueDate] && Math.abs(flows[dueDate].GBP + 96.45) < 0.01, 'calendar shows the repayment as money out on its date');
+    A.setPlannerMode('weeks');
+    DB.debts = []; DB.debtPayments = []; DB.planner = [];
+  }
+
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
