@@ -1938,6 +1938,33 @@ async function cycleSpace(dom, A){
     assert(Math.abs(carryVal - Math.abs(expected)) < 1, 'carried amount equals last week\'s remaining');
   }
 
+  console.log('--- Nightly-recalibrated margin ---');
+  {
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){
+        w.fetch = (url, opts) => {
+          if(String(url).includes('frankfurter')) return Promise.resolve({ok:true, status:200, json:()=>Promise.resolve({base:'USD', rates:{GBP:0.75}}), text:()=>Promise.resolve('')});
+          if(String(url).includes('fam_settings') && (!opts || (opts.method||'GET')==='GET'))
+            return Promise.resolve({ok:true, status:200, text:()=>Promise.resolve(JSON.stringify([{key:'remit_rate', value:{margin:0.05, mid:1.3333, checked_at:'2026-07-26T03:00:00Z'}}])), clone(){return this;}});
+          return mockFetch(url, opts);
+        };
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}}));
+      }});
+    await wait(320);
+    const w = dom.window, d = w.document, A = w.App;
+    assert(Math.abs(A.approxUSD(80,'GBP') - 80/0.75*0.95) < 0.01, 'stored margin (5%) drives conversions, not the constant');
+    d.querySelector('#tabs button[data-view="budgets"]').click(); await wait(60);
+    assert(d.getElementById('fx-status').textContent.includes('5.0%'), 'card shows the live margin and mid');
+    // sane recalibration: mid 1/0.75=1.3333; everyday 1.28 -> margin 4.0%
+    d.getElementById('fx-remit').value = '1.28';
+    d.getElementById('fx-save').click(); await wait(150);
+    assert(Math.abs(A.state.settings.remit_rate.margin - 0.04) < 0.001, 'entered everyday rate recalibrates the margin');
+    // a promotional rate above mid is refused
+    d.getElementById('fx-remit').value = '1.3687';
+    d.getElementById('fx-save').click(); await wait(100);
+    assert(d.getElementById('fx-err').style.display === '' && d.getElementById('fx-err').textContent.includes('promotional'), 'promo-rate entries rejected with an explanation');
+  }
+
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

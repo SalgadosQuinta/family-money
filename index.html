@@ -506,6 +506,16 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
       <div id="buf-list"><div class="empty">No movements yet.</div></div>
     </div>
     <div class="panel">
+      <div class="row"><h2>Remitly rate</h2><span class="small muted" id="fx-status"></span></div>
+      <p class="small muted" style="margin-top:0">USD amounts convert to pounds at the mid-market rate less this margin. The mid updates itself nightly; when Remitly's everyday rate moves, type it here and the margin recalibrates.</p>
+      <div class="inline2">
+        <div><label class="f" for="fx-remit">Everyday rate in your Remitly app (1 GBP = ? USD)</label>
+          <input id="fx-remit" type="number" step="0.0001" inputmode="decimal" placeholder="e.g. 1.2894"></div>
+        <div style="align-self:end"><button class="btn" id="fx-save">Recalibrate</button></div>
+      </div>
+      <div id="fx-err" class="small" style="color:var(--red);display:none"></div>
+    </div>
+    <div class="panel">
       <div class="row"><h2>Budgets this month</h2><button class="btn" id="bud-add-btn2">Add budget</button></div>
       <p class="small muted" style="margin-top:0">Set a monthly figure per category; the bar shows what has actually been spent against it this month.</p>
       <div id="bud-track"></div>
@@ -1456,10 +1466,14 @@ var App = (function(){
     return p.display_name || (p.email ? p.email.split('@')[0] : 'Unknown');
   }
 
+  function remitMargin(){
+    var rr = state.settings && state.settings.remit_rate;
+    return (rr && typeof rr.margin === 'number' && rr.margin >= 0 && rr.margin <= 0.1) ? rr.margin : REMIT_MARGIN;
+  }
   function usdToGBP(amount){
     // Funding $X via a remitter: effective rate = mid GBP→USD less the margin.
     var gbpPerUSD = (state.rates && state.rates.rates && state.rates.rates.GBP) || FALLBACK_RATES.GBP;
-    return (Number(amount) || 0) * gbpPerUSD / (1 - REMIT_MARGIN);
+    return (Number(amount) || 0) * gbpPerUSD / (1 - remitMargin());
   }
   function totalGBP(map){
     var g = Number(map.GBP || 0);
@@ -1477,7 +1491,7 @@ var App = (function(){
       else if(FALLBACK_RATES[ccy]) raw = (Number(amount) || 0) / FALLBACK_RATES[ccy];
     }
     if(raw === null) return null;
-    return raw * (1 - REMIT_MARGIN); // what a remittance company would actually give
+    return raw * (1 - remitMargin()); // what a remittance company would actually give
   }
 
   /* ---------------- session + API ---------------- */
@@ -1564,7 +1578,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v61';
+  var APP_BUILD = 'v62';
   try{ window.APP_BUILD_PUBLIC = APP_BUILD; }catch(e){}
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
@@ -2030,7 +2044,39 @@ var App = (function(){
     var main = document.querySelector('main');
     if(main) main.insertBefore(el, main.firstChild);
   }
+  function fxMid(){
+    if(state.rates && state.rates.rates && state.rates.rates.GBP) return 1 / state.rates.rates.GBP;
+    var rr = state.settings && state.settings.remit_rate;
+    return (rr && rr.mid) || (1 / FALLBACK_RATES.GBP);
+  }
+  function renderFxCard(){
+    var el = $('fx-status'); if(!el) return;
+    var rr = (state.settings && state.settings.remit_rate) || {};
+    el.textContent = 'margin ' + (remitMargin()*100).toFixed(1) + '% · mid ' + fxMid().toFixed(4) +
+      (rr.checked_at ? ' · checked ' + fmtDate(rr.checked_at.slice(0,10)) : '');
+  }
+  function saveFxCalibration(){
+    var rate = parseFloat($('fx-remit').value), err = $('fx-err');
+    err.style.display = 'none';
+    var mid = fxMid();
+    if(!(rate > 0)){ err.textContent = 'Enter the rate as shown in Remitly, e.g. 1.2894.'; err.style.display=''; return; }
+    var margin = 1 - rate/mid;
+    if(margin < 0 || margin > 0.1){
+      err.textContent = 'That rate implies a margin of ' + (margin*100).toFixed(1) + '% against a mid of ' + mid.toFixed(4) + ' — outside the sane range (0–10%). Check the figure; promotional first-transfer rates do not count.';
+      err.style.display=''; return;
+    }
+    var prev = (state.settings && state.settings.remit_rate) || {};
+    var next = Object.assign({}, prev, {margin: Math.round(margin*10000)/10000, remit_rate: rate,
+      mid: Math.round(mid*10000)/10000, checked_at: new Date().toISOString(), margin_source: 'entered in app'});
+    apiJSON('/rest/v1/fam_settings?on_conflict=key', {method:'POST',
+      headers:{'Prefer':'return=minimal,resolution=merge-duplicates'},
+      body:JSON.stringify({key:'remit_rate', value:next, updated_by:state.session.user.id, updated_at:new Date().toISOString()})})
+      .then(function(){ state.settings.remit_rate = next; $('fx-remit').value = '';
+        toast('Recalibrated — margin now ' + (margin*100).toFixed(1) + '%.'); renderAll(); })
+      .catch(function(e){ err.textContent = e.message; err.style.display=''; });
+  }
   function renderBudgets(){
+    renderFxCard();
     var b = bufferData();
     if($('buf-name')) $('buf-name').textContent = b.name;
     if($('buf-balance')) $('buf-balance').innerHTML = '<span style="color:var(--green)">' + esc(fmtMoney(b.balance, b.currency)) + '</span>';
@@ -4320,6 +4366,7 @@ var App = (function(){
     if($('buf-add')) $('buf-add').addEventListener('click', function(){ moveBuffer(1); });
     if($('buf-take')) $('buf-take').addEventListener('click', function(){ moveBuffer(-1); });
     if($('bud-add-btn2')) $('bud-add-btn2').addEventListener('click', function(){ openBudModal(null); });
+    if($('fx-save')) $('fx-save').addEventListener('click', saveFxCalibration);
     document.querySelector('main').addEventListener('change', function(e){
       var sel = e.target.closest('[data-act="memrole"]'); if(!sel) return;
       var uid = sel.getAttribute('data-id'), role = sel.value;
