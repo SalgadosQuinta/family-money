@@ -1730,6 +1730,27 @@ async function cycleSpace(dom, A){
     assert(d2.getElementById('notmember').style.display === 'none', 'not-a-member banner cleared');
   }
 
+  console.log('--- Boot watchdog & recovery ---');
+  {
+    const fmW = fs.readFileSync(path.join(__dirname,'..','index.html'),'utf8');
+    assert(fmW.includes('__fmRecover') && fmW.includes("location.search.indexOf('reset=1')"), 'reset=1 escape hatch present');
+    assert(fmW.includes('window.__fmBootOK'), 'app signals successful boot to the watchdog');
+    assert(fmW.indexOf('fm-stuck') < fmW.indexOf('var APP_BUILD'), 'watchdog runs before the main app script');
+    // Behaviour: a healthy boot must clear the watchdog (no stuck panel)
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){ w.fetch = mockFetch; w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}})); }});
+    await wait(400);
+    assert(dom.window.__FM_BOOTED === true, 'healthy boot marks itself booted');
+    assert(!dom.window.document.getElementById('fm-stuck'), 'no recovery panel on a healthy boot');
+    // Behaviour: a wedged boot (never signals) raises the panel with diagnostics
+    const dom2 = new JSDOM('<body></body>', {runScripts:'dangerously', url:'https://example.test/'});
+    const wd = fmW.match(/<script>\n\/\* Boot watchdog[\s\S]*?<\/script>/)[0].replace(/<\/?script>/g,'');
+    dom2.window.eval(wd.replace('}, 7000);', '}, 30);'));
+    await wait(120);
+    assert(dom2.window.document.getElementById('fm-stuck'), 'wedged boot shows the recovery panel');
+    assert(dom2.window.document.getElementById('fm-stuck-fix'), 'panel offers a reset button');
+  }
+
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

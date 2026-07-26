@@ -172,6 +172,63 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
 </style>
 </head>
 <body>
+<script>
+/* Boot watchdog and recovery hatch — deliberately first, tiny, and dependent on
+   nothing else, so it still works when the main app or a stale service worker
+   is the thing that is broken. */
+(function(){
+  var BUILD_HINT = document.currentScript ? '' : '';
+  function wipe(keepSession){
+    var session = null;
+    try{ session = localStorage.getItem('fm_session'); }catch(e){}
+    var jobs = [];
+    if(window.caches && caches.keys) jobs.push(caches.keys().then(function(ks){ return Promise.all(ks.map(function(k){ return caches.delete(k); })); }).catch(function(){}));
+    if(navigator.serviceWorker && navigator.serviceWorker.getRegistrations)
+      jobs.push(navigator.serviceWorker.getRegistrations().then(function(rs){ return Promise.all(rs.map(function(r){ return r.unregister(); })); }).catch(function(){}));
+    try{
+      Object.keys(localStorage).forEach(function(k){ if(k.indexOf('fm-cache:') === 0) localStorage.removeItem(k); });
+    }catch(e){}
+    return Promise.all(jobs).then(function(){
+      try{ if(keepSession && session) localStorage.setItem('fm_session', session); }catch(e){}
+    });
+  }
+  window.__fmRecover = wipe;
+
+  // Escape hatch: money.forgiatus.com/?reset=1 recovers a wedged install.
+  if(location.search.indexOf('reset=1') > -1){
+    wipe(true).then(function(){ location.replace(location.pathname); });
+    return;
+  }
+
+  var t = setTimeout(function(){
+    if(window.__FM_BOOTED) return;
+    var d = document.createElement('div');
+    d.id = 'fm-stuck';
+    d.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#0e0f11;color:#e8e6e1;font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:28px 22px;overflow:auto';
+    d.innerHTML = '<div style="max-width:520px;margin:8vh auto">' +
+      '<h2 style="margin:0 0 6px;font-size:19px">The app did not finish loading</h2>' +
+      '<p style="color:#a8a49c;margin:0 0 16px">Usually a stale offline copy. Resetting clears the cached app and reloads a fresh one. You stay signed in.</p>' +
+      '<button id="fm-stuck-fix" style="background:#c9a227;color:#141414;border:0;border-radius:8px;padding:11px 16px;font-size:15px;font-weight:600;cursor:pointer">Reset and reload</button> ' +
+      '<button id="fm-stuck-wait" style="background:none;color:#a8a49c;border:1px solid #33312d;border-radius:8px;padding:11px 16px;font-size:15px;cursor:pointer">Keep waiting</button>' +
+      '<p id="fm-stuck-diag" style="color:#6f6b64;font-size:11.5px;font-family:ui-monospace,monospace;margin-top:18px;word-break:break-all"></p></div>';
+    document.body.appendChild(d);
+    var diag = ['build ' + (window.APP_BUILD_PUBLIC || 'unknown'),
+      navigator.onLine ? 'online' : 'OFFLINE',
+      'sw ' + (navigator.serviceWorker && navigator.serviceWorker.controller ? 'controlling' : 'none'),
+      'stage ' + (window.__FM_STAGE || 'pre-init'),
+      (window.__FM_LAST_ERROR || '')].join(' \u00b7 ');
+    document.getElementById('fm-stuck-diag').textContent = diag;
+    document.getElementById('fm-stuck-fix').onclick = function(){
+      this.textContent = 'Resetting\u2026'; this.disabled = true;
+      wipe(true).then(function(){ location.reload(true); });
+    };
+    document.getElementById('fm-stuck-wait').onclick = function(){ d.remove(); };
+  }, 7000);
+  window.__fmBootOK = function(){ window.__FM_BOOTED = true; clearTimeout(t); var s = document.getElementById('fm-stuck'); if(s) s.remove(); };
+  window.addEventListener('error', function(e){ window.__FM_LAST_ERROR = 'err: ' + (e.message || '').slice(0,120); });
+  window.addEventListener('unhandledrejection', function(e){ window.__FM_LAST_ERROR = 'rej: ' + ((e.reason && e.reason.message) || '').slice(0,120); });
+})();
+</script>
 
 <div id="signin-view" class="signin" style="display:none">
   <div style="text-align:center;margin-bottom:18px">
@@ -1385,7 +1442,8 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v50';
+  var APP_BUILD = 'v51';
+  try{ window.APP_BUILD_PUBLIC = APP_BUILD; }catch(e){}
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
      is down we render the last-known data with a visible banner.
@@ -1903,10 +1961,14 @@ var App = (function(){
 
   /* ---------------- rendering ---------------- */
   function showSignIn(){
+    window.__FM_STAGE = 'signin-shown';
+    if(window.__fmBootOK) window.__fmBootOK();
     $('signin-view').style.display = '';
     $('app-view').style.display = 'none';
   }
   function showApp(){
+    window.__FM_STAGE = 'app-shown';
+    if(window.__fmBootOK) window.__fmBootOK();
     $('signin-view').style.display = 'none';
     $('app-view').style.display = '';
     $('notmember').style.display = state.isMember ? 'none' : '';
