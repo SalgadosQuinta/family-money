@@ -397,25 +397,6 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
         <button class="btn sm" data-goview="debts" style="margin-top:4px">View debts</button>
       </div>
     </div>
-    <div class="panel">
-      <div class="row"><h2>Net worth</h2><span class="eyebrow" id="d-today"></span></div>
-      <div class="statgrid" id="nw-headline"></div>
-      <div id="nw-chart" style="margin-top:10px"></div>
-      <div class="small muted" id="nw-note"></div>
-    </div>
-    <div class="panel">
-      <h2>Debt payback — tracking over time</h2>
-      <div id="nw-series"></div>
-    </div>
-    <div class="panel" id="d-buffer-panel">
-      <div class="row"><h2>Buffer — rainy day fund</h2><button class="btn sm" data-goview="budgets">Manage</button></div>
-      <div style="font-size:26px;font-weight:700;font-family:var(--mono,monospace);color:var(--green)" id="d-buffer">—</div>
-      <div class="small muted" id="d-buffer-sub"></div>
-    </div>
-    <div class="panel">
-      <div class="row"><h2>Due this week &amp; overdue</h2><span class="eyebrow" id="d-today2"></span></div>
-      <div id="d-due"></div>
-    </div>
     <div class="grid2">
       <div class="panel">
         <h2>Committed — next 30 days</h2>
@@ -426,6 +407,16 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
         <h2>Spend this month</h2>
         <div id="d-spend"></div>
       </div>
+    </div>
+    <div class="panel">
+      <div class="row"><h2>Net worth</h2><span class="eyebrow" id="d-today"></span></div>
+      <div class="statgrid" id="nw-headline"></div>
+      <div id="nw-chart" style="margin-top:10px"></div>
+      <div class="small muted" id="nw-note"></div>
+    </div>
+    <div class="panel">
+      <div class="row"><h2>Due this week &amp; overdue</h2><span class="eyebrow" id="d-today2"></span></div>
+      <div id="d-due"></div>
     </div>
     <div class="panel">
       <h2>Net position — what we owe</h2>
@@ -440,7 +431,11 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
       <p class="small muted" style="margin-top:0">Get an alert when your bills are due, go overdue, or a debt payment is coming up.</p>
       <div class="btnrow" style="justify-content:flex-start"><button class="btn" id="notif-btn">Enable notifications</button></div>
     </div>
-  </section>
+      <div class="panel">
+      <h2>Debt payback — tracking over time</h2>
+      <div id="nw-series"></div>
+    </div>
+</section>
 
   <!-- BILLS -->
   <section id="view-bills" style="display:none">
@@ -1560,7 +1555,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v56';
+  var APP_BUILD = 'v57';
   try{ window.APP_BUILD_PUBLIC = APP_BUILD; }catch(e){}
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
@@ -2317,20 +2312,24 @@ var App = (function(){
   function renderDashboard(){
     $('d-today').textContent = fmtDate(todayISO());
     if($('d-topstats')){
+      var toUSD = function(map){
+        var total = 0, complete = true;
+        Object.keys(map).forEach(function(c){
+          var v = approxUSD(map[c], c);
+          if(v === null) complete = false; else total += v;
+        });
+        return {total:total, complete:complete};
+      };
+      var usdStr = function(r){ return '$' + Math.round(r.total).toLocaleString('en-GB') + (r.complete ? '' : '*'); };
       var bf0 = bufferData();
-      $('d-buffer-top').textContent = fmtMoney(bf0.balance, bf0.currency);
+      var bufU = toUSD((function(){ var o={}; o[bf0.currency]=bf0.balance; return o; })());
+      $('d-buffer-top').textContent = usdStr(bufU);
       var dtot = {};
       state.debts.forEach(function(d0){ if(!d0.archived) dtot[d0.currency] = (dtot[d0.currency]||0) + Number(d0.balance); });
-      var dks = Object.keys(dtot);
-      $('d-debt-top').textContent = dks.length ? dks.map(function(c){ return fmtMoney(dtot[c], c); }).join(' · ') : 'None';
-      var nw = netWorth();
-      if(nw){ var nks = Object.keys(nw);
-        $('d-networth-top').textContent = nks.length ? nks.map(function(c){ return fmtMoney(nw[c], c); }).join(' · ') : '—'; }
-    }
-    if($('d-buffer')){
-      var bf = bufferData();
-      $('d-buffer').textContent = fmtMoney(bf.balance, bf.currency);
-      $('d-buffer-sub').textContent = bf.name + (bf.entries.length ? ' \u00b7 last movement ' + fmtDate(bf.entries[0].d) : ' \u00b7 no movements yet');
+      $('d-debt-top').textContent = Object.keys(dtot).length ? usdStr(toUSD(dtot)) : 'None';
+      var nwU = toUSD(netWorth());
+      $('d-networth-top').textContent = usdStr(nwU);
+      $('d-networth-sub').textContent = (bufU.complete && nwU.complete) ? 'approx, in USD' : 'approx, in USD · * a currency without a rate is excluded — set it in Admin';
     }
     if($('d-today2')) $('d-today2').textContent = '';
 

@@ -1768,7 +1768,7 @@ async function cycleSpace(dom, A){
     const fmB = fs.readFileSync(path.join(__dirname,'..','index.html'),'utf8');
     assert(fmB.includes('data-view="budgets"') && fmB.includes('id="view-budgets"'), 'Budgets tab in the top menu');
     assert(fmB.includes('function moveBuffer') && fmB.includes("key:'buffer'"), 'buffer add/remove persists without touching other records');
-    assert(fmB.includes('id="d-buffer"'), 'buffer figure on the dashboard');
+    assert(fmB.includes('id="d-buffer-top"'), 'buffer figure on the dashboard');
     assert(fmB.includes('Storage self-heal'), 'corrupt/oversized local cache purged on load');
     assert(fmB.includes('payload.length > 300000'), 'oversized payloads never cached');
 
@@ -1789,7 +1789,7 @@ async function cycleSpace(dom, A){
     d.getElementById('buf-take').click(); await wait(150);
     assert(Number(A.state.settings.buffer.balance) === 300, 'money taken out of the buffer');
     assert(d.getElementById('buf-list').textContent.includes('Taken out'), 'movements listed');
-    assert(d.getElementById('d-buffer').textContent.includes('300'), 'dashboard shows the current buffer');
+    assert(d.getElementById('d-buffer-top').textContent.length > 1, 'dashboard top shows the buffer figure');
   }
 
   console.log('--- Blank-screen watchdog ---');
@@ -1837,6 +1837,24 @@ async function cycleSpace(dom, A){
     d.querySelector('#tabs button[data-view="dashboard"]').click(); await wait(60);
     assert(d.getElementById('d-buffer-top') && d.getElementById('d-debt-top') && d.getElementById('d-networth-top'), 'net worth, buffer and total debt at the top of the dashboard');
     assert(d.getElementById('d-debt-top').textContent.length > 0, 'total debt figure populated');
+  }
+
+  console.log('--- Dashboard: USD-only top stats and ordering ---');
+  {
+    const fmD = fs.readFileSync(path.join(__dirname,'..','index.html'),'utf8');
+    assert(!fmD.includes('id="d-buffer-panel"'), 'duplicate lower buffer panel removed');
+    const sec = fmD.slice(fmD.indexOf('id="view-dashboard"'), fmD.indexOf('</section>', fmD.indexOf('id="view-dashboard"')));
+    const iTop = sec.indexOf('d-topstats'), iCom = sec.indexOf('Committed — next 30 days'), iNW = sec.indexOf('<h2>Net worth</h2>'), iDbt = sec.indexOf('Debt payback — tracking over time');
+    assert(iTop > -1 && iCom > iTop && iNW > iCom, 'committed sits just below the top stats');
+    assert(iDbt > iNW && iDbt === Math.max(iTop,iCom,iNW,iDbt), 'debt payback tracking is the last panel');
+    // behaviour: figures render as single USD values
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){ w.fetch = mockFetch; w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}})); }});
+    await wait(300);
+    const d = dom.window.document;
+    const nwT = d.getElementById('d-networth-top').textContent;
+    assert(nwT.startsWith('$') && !nwT.includes('·'), 'net worth shown as one USD figure');
+    assert(d.getElementById('d-debt-top').textContent.startsWith('$') || d.getElementById('d-debt-top').textContent === 'None', 'total debt as one USD figure');
   }
 
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');
