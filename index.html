@@ -54,6 +54,8 @@ main{max-width:860px;margin:0 auto;padding:14px}
 /* Panels & cards */
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px;margin-bottom:14px}
 .panel h2{margin:0 0 10px;font-size:14px;font-weight:650}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+@media(max-width:760px){.grid3{grid-template-columns:1fr}}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 @media(max-width:640px){.grid2{grid-template-columns:1fr}}
 .row{display:flex;align-items:center;justify-content:space-between;gap:10px}
@@ -378,6 +380,23 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
 
   <!-- DASHBOARD -->
   <section id="view-dashboard" style="display:none">
+    <div class="grid3" id="d-topstats" style="margin-bottom:14px">
+      <div class="panel" style="text-align:center">
+        <div class="eyebrow">Net worth</div>
+        <div style="font-size:24px;font-weight:700;font-family:var(--mono,monospace)" id="d-networth-top">—</div>
+        <div class="small muted" id="d-networth-sub"></div>
+      </div>
+      <div class="panel" style="text-align:center">
+        <div class="eyebrow">Buffer — rainy day</div>
+        <div style="font-size:24px;font-weight:700;font-family:var(--mono,monospace);color:var(--green)" id="d-buffer-top">—</div>
+        <button class="btn sm" data-goview="budgets" style="margin-top:4px">Manage buffer</button>
+      </div>
+      <div class="panel" style="text-align:center">
+        <div class="eyebrow">Total debt</div>
+        <div style="font-size:24px;font-weight:700;font-family:var(--mono,monospace);color:var(--red)" id="d-debt-top">—</div>
+        <button class="btn sm" data-goview="debts" style="margin-top:4px">View debts</button>
+      </div>
+    </div>
     <div class="panel">
       <div class="row"><h2>Net worth</h2><span class="eyebrow" id="d-today"></span></div>
       <div class="statgrid" id="nw-headline"></div>
@@ -1541,7 +1560,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v55';
+  var APP_BUILD = 'v56';
   try{ window.APP_BUILD_PUBLIC = APP_BUILD; }catch(e){}
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
@@ -2297,6 +2316,17 @@ var App = (function(){
 
   function renderDashboard(){
     $('d-today').textContent = fmtDate(todayISO());
+    if($('d-topstats')){
+      var bf0 = bufferData();
+      $('d-buffer-top').textContent = fmtMoney(bf0.balance, bf0.currency);
+      var dtot = {};
+      state.debts.forEach(function(d0){ if(!d0.archived) dtot[d0.currency] = (dtot[d0.currency]||0) + Number(d0.balance); });
+      var dks = Object.keys(dtot);
+      $('d-debt-top').textContent = dks.length ? dks.map(function(c){ return fmtMoney(dtot[c], c); }).join(' · ') : 'None';
+      var nw = netWorth();
+      if(nw){ var nks = Object.keys(nw);
+        $('d-networth-top').textContent = nks.length ? nks.map(function(c){ return fmtMoney(nw[c], c); }).join(' · ') : '—'; }
+    }
     if($('d-buffer')){
       var bf = bufferData();
       $('d-buffer').textContent = fmtMoney(bf.balance, bf.currency);
@@ -2511,6 +2541,7 @@ var App = (function(){
     return flows;
   }
   function renderCalendar(){
+    if(!state.plMonth) state.plMonth = todayISO().slice(0,7); // saved 'cal' mode can render before the planner initialises
     var ym = state.plMonth, el = $('pl-cal');
     var flows = calendarFlows(ym);
     var y = +ym.slice(0,4), m = +ym.slice(5,7);

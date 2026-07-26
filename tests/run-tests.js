@@ -1820,6 +1820,25 @@ async function cycleSpace(dom, A){
     assert(d.getElementById('income-list') && d.getElementById('income-list').innerHTML.length > 0, 'other sections still render');
   }
 
+  console.log('--- Saved calendar mode boots clean (the blank-screen root cause) ---');
+  {
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){
+        w.fetch = mockFetch;
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}}));
+        w.localStorage.setItem('fm_plmode', 'cal'); // the profile state that blanked the app
+      }});
+    await wait(400);
+    const d = dom.window.document, w = dom.window;
+    assert((w.__FM_ERRS||[]).length === 0, 'no runtime errors with saved cal mode (' + JSON.stringify((w.__FM_ERRS||[]).slice(0,2)) + ')');
+    assert(d.getElementById('pl-cal') && d.getElementById('pl-cal').innerHTML.length > 0, 'calendar renders from a cold boot');
+    assert(!d.querySelector('[id^="fatal-"]'), 'no section failed to draw');
+    // Dashboard top stats
+    d.querySelector('#tabs button[data-view="dashboard"]').click(); await wait(60);
+    assert(d.getElementById('d-buffer-top') && d.getElementById('d-debt-top') && d.getElementById('d-networth-top'), 'net worth, buffer and total debt at the top of the dashboard');
+    assert(d.getElementById('d-debt-top').textContent.length > 0, 'total debt figure populated');
+  }
+
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
