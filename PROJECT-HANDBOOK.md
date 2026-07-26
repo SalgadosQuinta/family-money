@@ -21,7 +21,8 @@ Backend: one Supabase project, ref **`ejlsbydsqjbxfwmvlapm`** (eu-central-1,
 PG17). Auth, Postgres with RLS, Storage (`receipts`, `backups`), Edge Functions:
 `notify`, `smart-capture` (v9: task + finance modes, images + PDFs),
 `admin-users`, `fam-reminders`, `notify-whatsapp`, `fam-backup`,
-`fx-recalibrate` (nightly Remitly-margin/mid refresh).
+`fx-recalibrate` (nightly Remitly-margin/mid refresh), `bill-to-debt` (reads a
+bill's notes and proposes debt fields; proposes only, the client writes).
 
 Scheduled jobs (pg_cron, all Vault-authenticated, no secrets in job commands):
 fam-reminders-daily 08:00 · fam-backup-nightly 02:00 · fx-recalibrate-daily 03:00 UTC.
@@ -33,7 +34,7 @@ fam-reminders-daily 08:00 · fam-backup-nightly 02:00 · fx-recalibrate-daily 03
 | Architecture, data model, spaces/RLS, client code map | `family-money/DOCUMENTATION.md` + `ARCHITECTURE-DETAILED.md` (Project knowledge) |
 | GTD console + tasks app, WhatsApp | `command-centre/DOCS.md` |
 | Backups, restore, SharePoint mirror (still unconfigured) | `family-money/BACKUP-AND-RESILIENCE.md` |
-| Database schema, in order | `family-money/supabase/migration-001…020` (ALL RUN as of 26 Jul 2026) |
+| Database schema, in order | `family-money/supabase/migration-001…021` (ALL RUN as of 26 Jul 2026) |
 | Any past decision | **Search this Project's past conversations** — the full build history is there |
 | Bootstrapping a brand-new Project | `AUTONOMOUS-BUILD-SETUP.md` (Project knowledge) |
 
@@ -65,7 +66,7 @@ anything he must do. Flag security items plainly.
 
 ## 4. Current state (26 Jul 2026)
 
-**Live and green (438 fm / 207 cc tests):** four spaces + PIN; Income tab with
+**Live and green (496 fm / 207 cc tests):** four spaces + PIN; Income tab with
 received-tracking; Budgets tab (category bars + standalone GBP "Nationwide
 Buffer" pot, add/take with movement log, figure on dashboard); planner —
 rolling 4-week board (current week first, ◀▶, label-reset), Day/Week/Calendar,
@@ -79,7 +80,14 @@ stats (net worth + total debt single USD, buffer native GBP), Committed-30d
 next, debt-payback chart last; currency model USD+GBP only, ZWG removed;
 remit margin stored in fam_settings 'remit_rate' (client card on Budgets tab
 recalibrates from the everyday rate; nightly job refreshes the mid; margin
-3.2% calibrated 26 Jul); two-tier admin (admin/manager/member, migration 020);
+3.2% calibrated 26 Jul); two-tier admin (admin/manager/member, migration 020); scheduled debt
+repayments projected onto the planner board, Day view and calendar from a
+debt's repayment day, plus a one-off "repay in full by" settlement date
+(migration 021) — derived, never stored, suppressed as soon as a real or
+planned payment covers the week, Record prefills date and amount; "Convert to
+debt" on any bill, with the bill's notes read by Claude Haiku via `bill-to-debt`
+into a pre-filled debt form (falls back to the bill's own figures if the
+analysis fails) and the bill archived rather than deleted on save;
 GTD console: scheduled time + Outlook deep-link, mobile photo capture with
 downscaling, All-outstanding view with groupings, overdue prominence
 everywhere. Session refresh is single-flight; storage self-heals; boot

@@ -2056,6 +2056,129 @@ async function cycleSpace(dom, A){
     DB.debts = []; DB.debtPayments = []; DB.planner = [];
   }
 
+  console.log('--- One-off settlement date ---');
+  {
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){ w.fetch = mockFetch; w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}})); }});
+    await wait(150);
+    const d = dom.window.document, A = dom.window.App;
+    const wks = A.weeksWindow(A.currentFriday(), 4);
+    const settle = wks[2].slice(0,8) + wks[2].slice(8,10); // a date inside week 3
+    DB.debts = [{id:'po1', name:'Phil', balance:8500, currency:'USD', min_payment:0, due_day:null,
+      payoff_date:settle, payoff_amount:null, archived:false, owner_name:'Rodney'}];
+    DB.debtPayments = []; DB.planner = []; DB.income = [];
+    await A.boot(); await wait(120);
+    d.querySelector('#tabs button[data-view="planner"]').click(); await wait(40);
+
+    assert(A.debtPayoffDue(DB.debts[0]).amount === 8500, 'a blank settlement amount means the whole balance');
+    assert(A.debtPayoffDue({id:'x', balance:8500, currency:'USD', payoff_date:settle, payoff_amount:3000, archived:false}).amount === 3000,
+      'an agreed settlement figure overrides the balance');
+    assert(A.debtPayoffDue({id:'x', balance:0, currency:'USD', payoff_date:settle, archived:false}) === null, 'a cleared debt has nothing to settle');
+    const list = A.debtDueList(wks[2]);
+    assert(list.length === 1 && list[0].kind === 'payoff' && list[0].date === settle, 'the settlement lands on its own date');
+    const colS = d.querySelector('#pl-board .wcol[data-week="' + wks[2] + '"]');
+    assert(colS.innerHTML.includes('settle in full') && colS.innerHTML.includes('Phil'), 'settle-in-full card on the board');
+    assert(colS.innerHTML.includes('whole balance'), 'card says the whole balance is due');
+
+    // A monthly repayment day on the same debt stops at the settlement date
+    DB.debts[0].min_payment = 500;
+    DB.debts[0].due_day = parseInt(wks[3].slice(8,10), 10); // a day in the week after settlement
+    await A.boot(); await wait(120);
+    const after = A.debtDueList(wks[3]);
+    assert(!after.some(x => x.kind === 'monthly'), 'monthly instalments stop once the debt is settled');
+    DB.debts[0].due_day = parseInt(wks[0].slice(8,10), 10); // a day before settlement
+    await A.boot(); await wait(120);
+    assert(A.debtDueList(wks[0]).some(x => x.kind === 'monthly'), 'instalments before the settlement date still project');
+
+    // The settlement reaches the day view and the calendar too
+    A.state.plDay = settle; A.setPlannerMode('day'); await wait(40);
+    assert(d.getElementById('day-list').innerHTML.includes('Debt settled in full'), 'day view names the settlement');
+    const fl = A.calendarFlows(settle.slice(0,7));
+    assert(fl[settle] && Math.abs(fl[settle].USD + 8500) < 0.01, 'calendar shows the settlement as money out');
+    A.setPlannerMode('weeks');
+
+    // The form round-trips the new fields
+    d.querySelector('#tabs button[data-view="debts"]').click(); await wait(60);
+    d.querySelector('button[data-act="dedit"][data-id="po1"]').click(); await wait(40);
+    assert(d.getElementById('dm-payoffdate').value === settle, 'settlement date loads into the form');
+    d.getElementById('dm-payoffamt').value = '3000';
+    d.getElementById('dm-save').click(); await wait(200);
+    assert(parseFloat(DB.debts[0].payoff_amount) === 3000, 'settlement amount saved');
+    DB.debts = []; DB.debtPayments = [];
+  }
+
+  console.log('--- Convert a bill into a debt ---');
+  {
+    let sentPayload = null, mode = 'ok';
+    const proposal = {name:'Phil', lender:'Phil', principal:8500, balance:8500, currency:'USD',
+      interest_rate:null, min_payment:500, due_day:15, payoff_date:'2026-09-30', payoff_amount:null,
+      notes:'Personal loan, no interest.', confidence:'high', reasoning:'The notes state the total owed and the settlement date.'};
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){
+        w.fetch = function(url, opts){
+          opts = opts || {};
+          if(String(url).includes('/functions/v1/bill-to-debt')){
+            sentPayload = JSON.parse(opts.body);
+            if(mode === 'fail') return Promise.resolve({ok:false, status:502, text:()=>Promise.resolve(JSON.stringify({error:'Analysis service returned 500'})), json:()=>Promise.resolve({error:'Analysis service returned 500'})});
+            return Promise.resolve({ok:true, status:200, text:()=>Promise.resolve(JSON.stringify({proposal, notes_used:true, reasoning:proposal.reasoning})), json:()=>Promise.resolve({proposal, notes_used:true, reasoning:proposal.reasoning})});
+          }
+          return mockFetch(url, opts);
+        };
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}}));
+      }});
+    await wait(150);
+    const d = dom.window.document, A = dom.window.App;
+    DB.bills = [{id:'bx1', name:'Phil', amount:500, currency:'USD', due_date:plusDays(5), recurrence:'monthly',
+      category:'Other', responsible:null, notes:'Borrowed 8500 from Phil, repay in full by 30 September, 500 a month on the 15th',
+      receipt_path:null, archived:false}];
+    DB.debts = []; DB.debtPayments = []; DB.planner = [];
+    await A.boot(); await wait(150);
+    d.querySelector('#tabs button[data-view="bills"]').click(); await wait(60);
+
+    const conv = d.querySelector('button[data-act="todebt"][data-id="bx1"]');
+    assert(conv, 'every bill offers Convert to debt');
+    conv.click(); await wait(200);
+    assert(sentPayload && sentPayload.bill.notes.includes('Borrowed 8500'), 'the notes are what gets analysed');
+    assert(sentPayload.bill.amount === 500 && sentPayload.bill.currency === 'USD', 'the bill figures go with them');
+    assert(d.getElementById('debt-modal').classList.contains('open'), 'the debt form opens for confirmation');
+    assert(d.getElementById('dm-title').textContent === 'Convert bill to debt', 'form titled as a conversion');
+    assert(d.getElementById('dm-ai').style.display !== 'none' && d.getElementById('dm-ai').textContent.includes('settlement date'),
+      'the banner explains what was read from the notes');
+    assert(parseFloat(d.getElementById('dm-balance').value) === 8500, 'total owed taken from the notes, not the monthly figure');
+    assert(parseFloat(d.getElementById('dm-minpay').value) === 500, 'monthly repayment taken from the notes');
+    assert(parseInt(d.getElementById('dm-dueday').value, 10) === 15, 'repayment day taken from the notes');
+    assert(d.getElementById('dm-payoffdate').value === '2026-09-30', 'settlement date taken from the notes');
+    assert(d.getElementById('dm-lender').value === 'Phil', 'lender taken from the notes');
+
+    d.getElementById('dm-save').click(); await wait(250);
+    assert(DB.debts.length === 1 && parseFloat(DB.debts[0].balance) === 8500, 'saving creates the debt');
+    assert(DB.debts[0].payoff_date === '2026-09-30' && parseInt(DB.debts[0].due_day,10) === 15, 'debt carries both dates');
+    assert(DB.bills.find(b=>b.id==='bx1').archived === true, 'the bill is archived, not deleted');
+    assert(!d.getElementById('debt-modal').classList.contains('open'), 'the form closes on success');
+
+    // When the analysis fails the conversion still works, straight from the bill
+    mode = 'fail';
+    DB.bills = [{id:'bx2', name:'Council Tax arrears', amount:2711.5, currency:'GBP', due_date:plusDays(9), recurrence:'none',
+      category:'Other', responsible:null, notes:null, receipt_path:null, archived:false}];
+    DB.debts = [];
+    await A.boot(); await wait(150);
+    d.querySelector('#tabs button[data-view="bills"]').click(); await wait(60);
+    d.querySelector('button[data-act="todebt"][data-id="bx2"]').click(); await wait(200);
+    assert(d.getElementById('debt-modal').classList.contains('open'), 'the form still opens when the analysis fails');
+    assert(d.getElementById('dm-ai').textContent.includes('could not be analysed'), 'the failure is stated plainly');
+    assert(parseFloat(d.getElementById('dm-balance').value) === 2711.5, 'balance falls back to the bill amount');
+    assert(d.getElementById('dm-name').value === 'Council Tax arrears', 'name falls back to the bill name');
+    d.getElementById('dm-save').click(); await wait(250);
+    assert(DB.debts.length === 1 && DB.bills.find(b=>b.id==='bx2').archived === true, 'the fallback conversion completes');
+
+    // Opening the debt form normally afterwards is clean again
+    d.querySelector('#tabs button[data-view="debts"]').click(); await wait(60);
+    d.getElementById('debt-add-btn').click(); await wait(40);
+    assert(d.getElementById('dm-ai').style.display === 'none', 'the banner clears on a normal Add debt');
+    assert(d.getElementById('dm-title').textContent === 'Add debt', 'and the title resets');
+    DB.debts = []; DB.bills = [];
+  }
+
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

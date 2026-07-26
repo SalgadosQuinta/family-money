@@ -1013,6 +1013,7 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
 <div class="modal-wrap" id="debt-modal">
   <div class="modal">
     <h3 id="dm-title">Add debt</h3>
+    <div id="dm-ai" class="small" style="display:none;border:1px solid var(--line);border-left:3px solid var(--brass);border-radius:8px;padding:8px 10px;margin-bottom:10px"></div>
     <label class="f" for="dm-name">Name</label>
     <input id="dm-name" placeholder="e.g. Barclaycard">
     <div class="inline2">
@@ -1063,6 +1064,13 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
       <div><label class="f" for="dm-dueday">Repayment day of month</label>
         <input id="dm-dueday" type="number" inputmode="numeric" min="1" max="31"></div>
     </div>
+    <div class="inline2">
+      <div><label class="f" for="dm-payoffdate">Repay in full by (one-off)</label>
+        <input id="dm-payoffdate" type="date"></div>
+      <div><label class="f" for="dm-payoffamt">Amount due then</label>
+        <input id="dm-payoffamt" type="number" inputmode="decimal" step="0.01" min="0" placeholder="whole balance"></div>
+    </div>
+    <p class="small muted" style="margin-top:-4px">A settlement date puts the money on the planner on that day. Leave the amount blank and the whole outstanding balance is assumed.</p>
     <label class="f" for="dm-account">Linked account</label>
     <select id="dm-account" class="acct-select"></select>
     <label class="f" for="dm-notes">Notes</label>
@@ -1372,15 +1380,26 @@ var App = (function(){
     if(paid) return true;
     return (items || []).some(function(i){ return i.debt_id === d.id && i.week_date === weekISO; });
   }
+  // A one-off settlement: the whole balance (or an agreed figure) on one date.
+  function debtPayoffDue(d){
+    if(!d || d.archived || !d.payoff_date || !(Number(d.balance) > 0)) return null;
+    var iso = String(d.payoff_date).slice(0,10);
+    var amt = Number(d.payoff_amount) > 0 ? Number(d.payoff_amount) : Number(d.balance);
+    return {id:d.id, name:d.name, date:iso, amount:amt, currency:d.currency, kind:'payoff'};
+  }
   // Every scheduled repayment landing in one planner week, already de-duplicated.
+  // Monthly instalments falling on or after a settlement date are dropped: the
+  // debt is gone by then, so projecting them would double-count the money.
   function debtDueList(weekISO, debts, payments, items){
     debts = debts || state.debts; payments = payments || state.debtPayments; items = items || state.planItems;
     var out = [];
     (debts || []).forEach(function(d){
-      var dates = debtDueDatesInWeek(d, weekISO);
-      if(!dates.length || debtDueCovered(d, weekISO, payments, items)) return;
-      dates.forEach(function(iso){
-        out.push({id:d.id, name:d.name, date:iso, amount:Number(d.min_payment) || 0, currency:d.currency});
+      if(debtDueCovered(d, weekISO, payments, items)) return;
+      var po = debtPayoffDue(d);
+      if(po && fridayOf(po.date) === weekISO) out.push(po);
+      debtDueDatesInWeek(d, weekISO).forEach(function(iso){
+        if(po && iso >= po.date) return;
+        out.push({id:d.id, name:d.name, date:iso, amount:Number(d.min_payment) || 0, currency:d.currency, kind:'monthly'});
       });
     });
     out.sort(function(a,b){ return a.date.localeCompare(b.date); });
@@ -1625,7 +1644,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v63';
+  var APP_BUILD = 'v64';
   try{ window.APP_BUILD_PUBLIC = APP_BUILD; }catch(e){}
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
@@ -2364,6 +2383,7 @@ var App = (function(){
       '<div class="list-actions">' +
         '<button class="linkbtn" data-act="paid" data-id="' + esc(b.id) + '">Mark paid</button>' +
         '<button class="linkbtn" data-act="edit" data-id="' + esc(b.id) + '">Edit</button>' +
+        '<button class="linkbtn" data-act="todebt" data-id="' + esc(b.id) + '">Convert to debt</button>' +
         '<button class="linkbtn" data-act="movesp" data-kind="bill" data-id="' + esc(b.id) + '">→ ' + (currentSpace()==='family'?'Private':'Family') + '</button>' +
         (b.receipt_path ? '<button class="linkbtn" data-act="receipt" data-path="' + esc(b.receipt_path) + '">Receipt</button>' : '') +
         (state.isAdmin ? '<button class="linkbtn red" data-act="del" data-id="' + esc(b.id) + '">Delete</button>' : '') +
@@ -2575,10 +2595,12 @@ var App = (function(){
         }
         return '<div class="card debtplan' + (od ? ' od' : '') + '" data-duedebt="' + esc(x.id) + '">' +
           '<div class="crow"><span class="ctitle">' + (od ? '<span class="badge od">DUE</span> ' : '') + esc(x.name) +
-          ' <span class="badge debt">repayment due</span></span>' +
+          ' <span class="badge debt">' + (x.kind === 'payoff' ? 'settle in full' : 'repayment due') + '</span></span>' +
           '<span class="amount' + (od ? ' overdue' : '') + '">' + (x.amount > 0 ? esc(fmtMoney(x.amount, x.currency)) : '\u2014') + '</span></div>' +
           '<div class="cactions"><span class="small ' + (od ? 'red' : 'muted') + '">' + (od ? 'was due ' : 'due ') + esc(fmtShort(x.date)) +
-          (x.amount > 0 ? '' : ' \u00b7 no repayment amount set') + '</span>' +
+          (x.kind === 'payoff' && !(Number(x.amount) > 0) ? ' \u00b7 nothing outstanding'
+            : x.kind === 'payoff' ? ' \u00b7 whole balance'
+            : x.amount > 0 ? '' : ' \u00b7 no repayment amount set') + '</span>' +
           '<button class="linkbtn" data-act="ddue" data-id="' + esc(x.id) + '" data-date="' + esc(x.date) + '">Record</button></div></div>';
       }).join('');
       var itemCards = state.planItems.filter(function(i){ return i.week_date === w; }).map(function(i){
@@ -2682,8 +2704,11 @@ var App = (function(){
     state.planItems.forEach(function(it){ bump(it.on_date || it.week_date, it.currency, -Number(it.amount)); });
     state.bills.forEach(function(b){ if(!b.archived) bump(b.due_date, b.currency, -Number(b.amount)); });
     state.debts.forEach(function(d){
+      var po = debtPayoffDue(d);
+      if(po && !debtDueCovered(d, fridayOf(po.date), state.debtPayments, state.planItems)) bump(po.date, po.currency, -po.amount);
       var iso = debtDueDateInMonth(d, ym);
       if(!iso || !(Number(d.min_payment) > 0)) return;
+      if(po && iso >= po.date) return;
       if(debtDueCovered(d, fridayOf(iso), state.debtPayments, state.planItems)) return;
       bump(iso, d.currency, -Number(d.min_payment));
     });
@@ -2723,7 +2748,8 @@ var App = (function(){
     state.planItems.forEach(function(it){ if((it.on_date || '') === iso) rows.push({t:it.paid ? 'Item · paid' : 'Item', name:it.title, amt:-Number(it.amount), ccy:it.currency, edit:{kind:'item', id:it.id}}); });
     debtDueList(fridayOf(iso)).forEach(function(x){
       if(x.date !== iso) return;
-      rows.push({t:(iso < todayISO() ? 'Debt repayment due · overdue' : 'Debt repayment due'), name:x.name, amt:-x.amount, ccy:x.currency, edit:{kind:'debtdue', id:x.id}});
+      var lbl = x.kind === 'payoff' ? 'Debt settled in full' : 'Debt repayment due';
+      rows.push({t:(iso < todayISO() ? lbl + ' · overdue' : lbl), name:x.name, amt:-x.amount, ccy:x.currency, edit:{kind:'debtdue', id:x.id}});
     });
     // week-anchored entries surface on their Friday
     if(fridayOf(iso) === iso){
@@ -3339,6 +3365,8 @@ var App = (function(){
           (proj === null && Number(d.min_payment) > 0 && Number(d.balance) > 0 ? '<span class="badge red">Growing</span>' : '') + '</div>' +
         '<div class="small muted">' + esc(d.owner_name) + (d.lender ? ' · ' + esc(d.lender) : '') +
           (Number(d.interest_rate) ? ' · ' + esc(String(d.interest_rate)) + '% APR' : '') +
+          (d.payoff_date ? ' · repay in full by ' + esc(fmtShort(String(d.payoff_date).slice(0,10))) +
+            (Number(d.payoff_amount) > 0 ? ' (' + esc(fmtMoney(d.payoff_amount, d.currency)) + ')' : '') : '') +
           (d.due_day ? ' · next repayment ' + esc(fmtShort(nextDueFromDay(d.due_day))) + (Number(d.min_payment) > 0 ? ' · ' + esc(fmtMoney(d.min_payment, d.currency)) + ' — on the planner' : ' — set a repayment amount to show it on the planner') : '') + '</div>' +
         '<div class="small muted">' + esc(projTxt) + '</div>' +
         (eq ? '<div class="small" style="color:var(--green)">' + esc(eq.name) + (ai && ai.linked ? ' (register)' : '') + ' equity: ' + esc(fmtMoney(eq.equity, eq.currency)) + ' of ' + esc(fmtMoney(eq.value, eq.currency)) + '</div>' : (ai && ai.value != null ? '<div class="small muted">' + esc(ai.name) + ' valued ' + esc(fmtMoney(ai.value, ai.currency)) + ' (different currency to the debt)</div>' : '')) +
@@ -3529,6 +3557,8 @@ var App = (function(){
 
   function openDebtModal(d){
     state.editingDebt = d || null;
+    state.convertingBill = null;
+    if($('dm-ai')){ $('dm-ai').style.display = 'none'; $('dm-ai').innerHTML = ''; }
     fillOwnerSelect('dm-owner-member'); fillAccountSelects();
     $('dm-title').textContent = d ? 'Edit debt' : 'Add debt';
     $('dm-name').value = d ? d.name : '';
@@ -3542,6 +3572,8 @@ var App = (function(){
     $('dm-rate').value = d ? d.interest_rate : 0;
     $('dm-minpay').value = d ? d.min_payment : '';
     $('dm-dueday').value = d && d.due_day ? d.due_day : '';
+    $('dm-payoffdate').value = d && d.payoff_date ? String(d.payoff_date).slice(0,10) : '';
+    $('dm-payoffamt').value = d && d.payoff_amount != null ? d.payoff_amount : '';
     $('dm-account').value = d && d.account_id ? d.account_id : '';
     var link = $('dm-asset-link');
     link.innerHTML = '<option value="">— Not in the register (enter manually) —</option>' +
@@ -3559,6 +3591,62 @@ var App = (function(){
     $('dm-err').style.display = 'none';
     modalOpen('debt-modal');
   }
+  /* ---------------- Bill -> debt ---------------- */
+  // Some entries were captured as bills when they were really money owed. The
+  // detail is usually in the notes, in plain language, so the notes are read by
+  // Claude and turned into a proposed debt. Nothing is written until the form
+  // below is confirmed, and the bill is archived rather than deleted.
+  function billToDebtPayload(b){
+    return {bill:{name:b.name, amount:Number(b.amount), currency:b.currency, due_date:b.due_date,
+      recurrence:b.recurrence, category:b.category, notes:b.notes || null}, today:todayISO()};
+  }
+  function convertBillToDebt(b){
+    if(!b) return;
+    state.convertingBill = b;
+    toast(b.notes ? 'Reading the notes\u2026' : 'Preparing the debt\u2026');
+    apiJSON('/functions/v1/bill-to-debt', {method:'POST', body:JSON.stringify(billToDebtPayload(b))})
+      .then(function(j){ openDebtFromBill(b, j && j.proposal, (j && j.reasoning) || ''); })
+      .catch(function(e){ openDebtFromBill(b, null, '', e.message); });
+  }
+  // Map a proposal onto the debt form. Every figure stays editable, and anything
+  // the model was unsure of is simply left blank rather than guessed at.
+  function applyDebtProposal(b, p){
+    var num = function(v){ var n = parseFloat(v); return isFinite(n) && n > 0 ? n : null; };
+    var ccy = ((p && p.currency) || b.currency || 'GBP').toUpperCase();
+    if(CURRENCIES.indexOf(ccy) < 0) ccy = b.currency || 'GBP';
+    var bal = (p && num(p.balance)) || Number(b.amount) || 0;
+    $('dm-name').value = (p && p.name) || b.name || '';
+    $('dm-lender').value = (p && p.lender) || '';
+    $('dm-type').value = (p && p.lender && !/card/i.test(String(p.name || ''))) ? 'personal' : $('dm-type').value;
+    $('dm-balance').value = bal;
+    $('dm-principal').value = (p && num(p.principal)) || bal;
+    $('dm-currency').value = ccy;
+    $('dm-rate').value = (p && num(p.interest_rate)) || 0;
+    $('dm-minpay').value = (p && num(p.min_payment)) || '';
+    var dd = p && parseInt(p.due_day, 10);
+    $('dm-dueday').value = (dd >= 1 && dd <= 31) ? dd : '';
+    var pd = p && typeof p.payoff_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(p.payoff_date) ? p.payoff_date : '';
+    $('dm-payoffdate').value = pd;
+    $('dm-payoffamt').value = (p && num(p.payoff_amount)) || '';
+    $('dm-account').value = b.account_id || '';
+    $('dm-notes').value = (p && p.notes) || b.notes || '';
+  }
+  function openDebtFromBill(b, p, reasoning, err){
+    openDebtModal(null);
+    state.convertingBill = b;
+    applyDebtProposal(b, p);
+    $('dm-title').textContent = 'Convert bill to debt';
+    var conf = p && p.confidence ? String(p.confidence) : '';
+    var banner = $('dm-ai');
+    banner.style.borderLeftColor = err ? 'var(--red)' : conf === 'low' ? 'var(--red)' : 'var(--brass)';
+    banner.innerHTML = err
+      ? '<strong>The notes could not be analysed</strong><div class="muted">' + esc(err) + ' \u2014 the figures below come straight from the bill, so check them before saving.</div>'
+      : '<strong>Read from the bill' + (b.notes ? ' and its notes' : '') + (conf ? ' \u00b7 ' + esc(conf) + ' confidence' : '') + '</strong>' +
+        (reasoning ? '<div class="muted">' + esc(reasoning) + '</div>' : '') +
+        '<div class="muted">Check every figure. Saving creates the debt and archives \u201c' + esc(b.name) + '\u201d as a bill.</div>';
+    banner.style.display = '';
+  }
+
   function saveDebt(){
     var name = $('dm-name').value.trim(), balance = parseFloat($('dm-balance').value);
     var errEl = $('dm-err');
@@ -3573,6 +3661,8 @@ var App = (function(){
       currency:$('dm-currency').value, interest_rate:parseFloat($('dm-rate').value) || 0,
       min_payment:parseFloat($('dm-minpay').value) || 0,
       due_day:(dd >= 1 && dd <= 31) ? dd : null,
+      payoff_date:($('dm-payoffdate').value || null),
+      payoff_amount:(parseFloat($('dm-payoffamt').value) > 0 ? parseFloat($('dm-payoffamt').value) : null),
       account_id:($('dm-account').value || null), notes:($('dm-notes').value.trim() || null),
       asset_backed: $('dm-asset').checked,
       asset_id: $('dm-asset').checked ? ($('dm-asset-link').value || null) : null,
@@ -3583,7 +3673,20 @@ var App = (function(){
     var p = state.editingDebt
       ? apiJSON('/rest/v1/fam_debts?id=eq.' + state.editingDebt.id, {method:'PATCH', body:JSON.stringify(body)})
       : apiJSON('/rest/v1/fam_debts', {method:'POST', headers:{'Prefer':'return=minimal'}, body:JSON.stringify(spaceBody(body))});
-    p.then(function(){ modalClose('debt-modal'); toast('Debt saved.'); return loadDebts().then(function(){ renderDebts(); renderNetPosition(); }); })
+    var converted = state.convertingBill;
+    p.then(function(){
+      if(!converted) return null;
+      return apiJSON('/rest/v1/fam_bills?id=eq.' + converted.id, {method:'PATCH',
+        body:JSON.stringify({archived:true, updated_at:new Date().toISOString()})})
+        .then(function(){ return loadBills(); })
+        .catch(function(e){ toast('Debt saved, but the bill could not be archived: ' + e.message); });
+    })
+    .then(function(){
+      modalClose('debt-modal');
+      toast(converted ? 'Converted \u2014 debt created and the bill archived.' : 'Debt saved.');
+      state.convertingBill = null;
+      return loadDebts().then(function(){ renderDebts(); renderNetPosition(); renderAll(); });
+    })
      .catch(function(e){ errEl.textContent = e.message; errEl.style.display=''; });
   }
 
@@ -4782,6 +4885,7 @@ var App = (function(){
       var act = b.getAttribute('data-act'), id = b.getAttribute('data-id');
       if(act === 'edit'){ openBillModal(state.bills.find(function(x){ return x.id === id; })); }
       else if(act === 'paid'){ openPaidModal(state.bills.find(function(x){ return x.id === id; })); }
+      else if(act === 'todebt'){ convertBillToDebt(state.bills.find(function(x){ return x.id === id; })); }
       else if(act === 'receipt'){ viewReceipt(b.getAttribute('data-path')); }
       else if(act === 'del'){
         askConfirm('Delete bill', 'This removes the bill (paid history is kept).', function(){
@@ -4917,7 +5021,8 @@ var App = (function(){
     privateUnlocked:privateUnlocked, requirePrivatePin:requirePrivatePin, requireSpacePin:requireSpacePin, savePinSetting:savePinSetting, materialiseIncome:materialiseIncome,
     currentSpace:currentSpace, spaceFilter:spaceFilter, spaceBody:spaceBody, setSpace:setSpace, switchSpace:switchSpace, goToSpace:goToSpace, moveSpace:moveSpace,
     parseCSV:parseCSV, detectRecurring:detectRecurring, nextDueFromDay:nextDueFromDay,
-    debtDueList:debtDueList, debtDueDatesInWeek:debtDueDatesInWeek, debtDueDateInMonth:debtDueDateInMonth,
+    debtDueList:debtDueList, debtDueDatesInWeek:debtDueDatesInWeek, debtDueDateInMonth:debtDueDateInMonth, debtPayoffDue:debtPayoffDue,
+    convertBillToDebt:convertBillToDebt, applyDebtProposal:applyDebtProposal, billToDebtPayload:billToDebtPayload,
     calendarFlows:calendarFlows, renderCalendar:renderCalendar, setPlannerMode:setPlannerMode, spaceLabel:spaceLabel,
     nextOnDate:nextOnDate, renderDay:renderDay,
     loadGrants:loadGrants, loadNotifyPrefs:loadNotifyPrefs, exportBackup:exportBackup, BACKUP_TABLES:BACKUP_TABLES, renderBackupList:renderBackupList,
