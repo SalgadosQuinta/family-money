@@ -1541,7 +1541,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v54';
+  var APP_BUILD = 'v55';
   try{ window.APP_BUILD_PUBLIC = APP_BUILD; }catch(e){}
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
@@ -1555,7 +1555,7 @@ var App = (function(){
   function cacheUid(){ return (state.session && state.session.user && state.session.user.id) || 'anon'; }
   function cachePut(path, data){
     try{
-      var payload = JSON.stringify({t:Date.now(), d:data});
+      var payload = JSON.stringify({t:Date.now(), b:APP_BUILD, d:data});
       if(payload.length > 300000) return; // never cache a payload big enough to fill the store
       localStorage.setItem('fm-cache:' + cacheUid() + ':' + path, payload);
     }catch(e){
@@ -1568,7 +1568,17 @@ var App = (function(){
       }catch(e3){}
     }
   }
-  function cacheGet(path){ try{ var v = localStorage.getItem('fm-cache:' + cacheUid() + ':' + path); return v ? JSON.parse(v) : null; }catch(e){ return null; } }
+  function cacheGet(path){
+    try{
+      var v = localStorage.getItem('fm-cache:' + cacheUid() + ':' + path);
+      if(!v) return null;
+      var o = JSON.parse(v);
+      // Data cached by a different build may have a different shape — safer to
+      // show 'offline, no saved data' than to feed it to today's renderers.
+      if(!o || o.b !== APP_BUILD) return null;
+      return o;
+    }catch(e){ return null; }
+  }
   function outbox(){ try{ return JSON.parse(localStorage.getItem('fm-outbox:' + cacheUid()) || '[]'); }catch(e){ return []; } }
   function outboxSave(q){ try{ localStorage.setItem('fm-outbox:' + cacheUid(), JSON.stringify(q)); }catch(e){} offlineBadge(); }
   function outboxAdd(path, opts){
@@ -1986,6 +1996,16 @@ var App = (function(){
       toast(sign > 0 ? 'Added to the buffer.' : 'Taken out of the buffer.');
       renderBudgets(); renderDashboard();
     }).catch(function(e){ err.textContent = e.message; err.style.display = ''; });
+  }
+  function showFatal(msg, key){
+    var id = 'fatal-' + (key || 'x');
+    if(document.getElementById(id)) return;
+    var el = document.createElement('div');
+    el.id = id;
+    el.style.cssText = 'background:#3a1512;color:#e8a19a;border:1px solid #6b2a24;border-radius:8px;padding:10px 14px;margin:10px 14px;font-size:13px';
+    el.textContent = '\u26a0 ' + msg + ' \u2014 the rest of the app keeps working. Screenshot this line for Rodney\u2019s Claude.';
+    var main = document.querySelector('main');
+    if(main) main.insertBefore(el, main.firstChild);
   }
   function renderBudgets(){
     var b = bufferData();
@@ -4021,10 +4041,22 @@ var App = (function(){
   }
 
   function renderAll(){
-    renderNetWorth();
-    renderBills(); renderPayments(); renderExpenses(); renderIncome(); renderBudgets(); renderDashboard(); renderPlanner();
-    renderDebts(); renderDebtPayments(); renderNetPosition(); renderAnalysis(); renderAdmin(); renderAssets(); fillPaybackSelect(); if(state.ppMode === 'date') renderPaybackDate();
-    fillAccountSelects(); setupNotifCard();
+    [['Net worth',renderNetWorth],['Bills',renderBills],['Payments',renderPayments],['Expenses',renderExpenses],['Income',renderIncome],['Budgets',renderBudgets],['Dashboard',renderDashboard],['Planner',renderPlanner]].forEach(function(rp){
+      try{ rp[1](); }
+      catch(e){
+        try{ window.__FM_ERRS && window.__FM_ERRS.push(rp[0] + ' render: ' + e.message); }catch(x){}
+        showFatal(rp[0] + ' section failed to draw: ' + e.message, rp[0]);
+      }
+    });
+    [['Debts',renderDebts],['Debt payments',renderDebtPayments],['Net position',renderNetPosition],['Analysis',renderAnalysis],['Admin',renderAdmin],['Assets',renderAssets],
+     ['Payback',function(){ fillPaybackSelect(); if(state.ppMode === 'date') renderPaybackDate(); }],
+     ['Form setup',function(){ fillAccountSelects(); setupNotifCard(); }]].forEach(function(rp){
+      try{ rp[1](); }
+      catch(e){
+        try{ window.__FM_ERRS && window.__FM_ERRS.push(rp[0] + ' render: ' + e.message); }catch(x){}
+        showFatal(rp[0] + ' section failed to draw: ' + e.message, rp[0]);
+      }
+    });
   }
 
   /* ---------------- modals ---------------- */
@@ -4693,7 +4725,7 @@ var App = (function(){
     approxUSD:approxUSD, signIn:signIn, signOut:signOut, api:api, apiJSON:apiJSON,
     loadSession:loadSession, saveSession:saveSession,
     state:state, init:init, boot:boot, todayISO:todayISO,
-    fridayOf:fridayOf, weeksOfMonth:weeksOfMonth, weeksWindow:weeksWindow, currentFriday:currentFriday, addWeeksISO:addWeeksISO, weekTotals:weekTotals, shiftMonth:shiftMonth,
+    renderAll:renderAll, fridayOf:fridayOf, weeksOfMonth:weeksOfMonth, weeksWindow:weeksWindow, currentFriday:currentFriday, addWeeksISO:addWeeksISO, weekTotals:weekTotals, shiftMonth:shiftMonth,
     moveCard:moveCard, mapCaptureResponse:mapCaptureResponse, renderPlanner:renderPlanner,
     accountBalance:accountBalance, payoffProjection:payoffProjection, payoffPlan:payoffPlan, renderPayback:renderPayback, fillPaybackSelect:fillPaybackSelect,
     periodsUntil:periodsUntil, requiredPayment:requiredPayment, renderPaybackDate:renderPaybackDate, setPaybackMode:setPaybackMode, monthlyClose:monthlyClose,

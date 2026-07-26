@@ -1802,6 +1802,24 @@ async function cycleSpace(dom, A){
     assert(fmW.includes("__FM_STAGE === 'signin-shown'") , 'sign-in screen exempt from the blank check');
   }
 
+  console.log('--- Render isolation + build-stamped cache ---');
+  {
+    const fmR = fs.readFileSync(path.join(__dirname,'..','index.html'),'utf8');
+    assert(fmR.includes('o.b !== APP_BUILD'), 'cache from another build is never replayed');
+    assert(fmR.includes('function showFatal'), 'render failures surface visibly');
+    // behaviour: break one renderer, app still paints the rest + banner
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){ w.fetch = mockFetch; w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}})); }});
+    await wait(250);
+    const w = dom.window, d = w.document;
+    // sabotage: bills rows missing a field the renderer needs
+    w.App.state.bills = [null];
+    w.App.renderAll();
+    await wait(80);
+    assert(d.querySelector('[id^="fatal-"]'), 'broken section announces itself in red');
+    assert(d.getElementById('income-list') && d.getElementById('income-list').innerHTML.length > 0, 'other sections still render');
+  }
+
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
