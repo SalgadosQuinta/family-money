@@ -251,7 +251,7 @@ async function cycleSpace(dom, A){
     assert(d.getElementById('expenses-list').innerHTML.includes('Transport'), 'expense list re-rendered');
 
     // --- approxUSD ---
-    assert(Math.abs(A.approxUSD(80,'GBP') - 97.8) < 0.01, 'approxUSD converts via frankfurter rates less the remittance margin');
+    assert(Math.abs(A.approxUSD(80,'GBP') - 96.8) < 0.01, 'approxUSD converts via frankfurter rates less the remittance margin');
     assert(A.approxUSD(50,'XXX') === null, 'an unknown currency returns null gracefully');
   }
 
@@ -684,8 +684,8 @@ async function cycleSpace(dom, A){
     const d = dom.window.document, A = dom.window.App;
 
     // Manual ZWG rate feeds approxUSD
-    assert(Math.abs(A.approxUSD(400,'ZZZ') - 9.78) < 0.001, 'a manual rate converts with the remittance margin (400/40 = $10 market, $9.78 received)');
-    assert(Math.abs(A.approxUSD(80,'GBP') - 97.8) < 0.01, 'frankfurter rates still preferred where available (margin applied)');
+    assert(Math.abs(A.approxUSD(400,'ZZZ') - 9.68) < 0.001, 'a manual rate converts with the remittance margin (400/40 = $10 market, $9.68 received)');
+    assert(Math.abs(A.approxUSD(80,'GBP') - 96.8) < 0.01, 'frankfurter rates still preferred where available (margin applied)');
 
     // PIN: none set -> not required
     assert(A.pinRequired() === false, 'no PIN set means no lock');
@@ -1884,7 +1884,7 @@ async function cycleSpace(dom, A){
     const fmS = fs.readFileSync(path.join(__dirname,'..','index.html'),'utf8');
     assert(fmS.includes('function ccyOrder'), 'currency ordering helper present');
     assert(fmS.includes('mline-main') && fmS.includes('mline-sub'), 'stacked line styles for GBP-over-USD');
-    assert(fmS.includes('REMIT_MARGIN = 0.022'), 'remittance-style margin defined');
+    assert(fmS.includes('REMIT_MARGIN = 0.032'), 'remittance-style margin defined, calibrated to Remitly');
     const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
       beforeParse(w){ w.fetch = mockFetch; w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}})); }});
     await wait(300);
@@ -1902,6 +1902,40 @@ async function cycleSpace(dom, A){
     w.App.renderPlanner(); await wait(60);
     const ins2 = d.querySelector('#pl-board .wcol.nowweek .wfoot .frow').querySelectorAll('.mline');
     assert(ins2.length === 1 && ins2[0].textContent.startsWith('\u00a3'), 'no USD line unless something was entered in USD');
+  }
+
+  console.log('--- Single-GBP remaining + carry-over ---');
+  {
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){
+        w.fetch = (url, opts) => String(url).includes('frankfurter')
+          ? Promise.resolve({ok:true, status:200, json:()=>Promise.resolve({base:'USD', rates:{GBP:0.75}}), text:()=>Promise.resolve('')})
+          : mockFetch(url, opts);
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}}));
+      }});
+    await wait(320);
+    const w = dom.window, d = w.document, A = w.App;
+    const cf = A.currentFriday();
+    // Mixed week: £21,400 in; £2,564.99 out + $13,300 out. $13,300 at 0.75/(1-0.032) => £10,330.58
+    A.state.income = [{id:'i1', person:'Fees', amount:21400, currency:'GBP', week_date:cf}];
+    A.state.planItems = [{id:'p1', title:'School', amount:2564.99, currency:'GBP', week_date:cf, paid:false, recurrence:'none'},
+                         {id:'p2', title:'Farm loan', amount:13300, currency:'USD', week_date:cf, paid:false, recurrence:'none'}];
+    A.state.bills = []; A.state.debtPayments = [];
+    A.renderPlanner(); await wait(60);
+    const foot = d.querySelector('#pl-board .wcol.nowweek .wfoot');
+    const remRow = Array.from(foot.querySelectorAll('.frow')).find(r=>r.textContent.includes('Remaining'));
+    const remTxt = remRow.querySelector('span:last-child').textContent;
+    assert(remTxt.startsWith('\u00a3') && !remTxt.includes('$'), 'Remaining is one GBP figure only (got ' + remTxt + ')');
+    const expected = 21400 - 2564.99 - (13300*0.75/(1-0.032));
+    const shown = parseFloat(remTxt.replace(/[^0-9.]/g,''));
+    assert(Math.abs(shown - Math.abs(expected)) < 1, 'USD outflow converted at the Remitly-style rate into the GBP remaining (expected ~' + expected.toFixed(0) + ', got ' + shown + ')');
+    // Carry-over: next week's footer carries this week's remaining in
+    const cols = d.querySelectorAll('#pl-board .wcol');
+    const foot2 = cols[1].querySelector('.wfoot');
+    assert(foot2.textContent.includes('Carried over'), 'next week shows the carried amount');
+    const carryTxt = Array.from(foot2.querySelectorAll('.frow')).find(r=>r.textContent.includes('Carried over')).querySelector('span:last-child').textContent;
+    const carryVal = parseFloat(carryTxt.replace(/[^0-9.]/g,''));
+    assert(Math.abs(carryVal - Math.abs(expected)) < 1, 'carried amount equals last week\'s remaining');
   }
 
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');

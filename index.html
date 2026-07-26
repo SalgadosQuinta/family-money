@@ -1456,6 +1456,17 @@ var App = (function(){
     return p.display_name || (p.email ? p.email.split('@')[0] : 'Unknown');
   }
 
+  function usdToGBP(amount){
+    // Funding $X via a remitter: effective rate = mid GBP→USD less the margin.
+    var gbpPerUSD = (state.rates && state.rates.rates && state.rates.rates.GBP) || FALLBACK_RATES.GBP;
+    return (Number(amount) || 0) * gbpPerUSD / (1 - REMIT_MARGIN);
+  }
+  function totalGBP(map){
+    var g = Number(map.GBP || 0);
+    if(map.USD) g += usdToGBP(map.USD);
+    Object.keys(map).forEach(function(c){ if(c !== 'GBP' && c !== 'USD') g += Number(map[c]) || 0; });
+    return g;
+  }
   function approxUSD(amount, ccy){
     if(ccy === 'USD') return Number(amount) || 0;
     var raw = null;
@@ -1553,7 +1564,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v60';
+  var APP_BUILD = 'v61';
   try{ window.APP_BUILD_PUBLIC = APP_BUILD; }catch(e){}
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
@@ -2124,8 +2135,8 @@ var App = (function(){
       })
       .catch(function(){ state.settings = {}; });
   }
-  var FALLBACK_RATES = {GBP: 0.79}; // last resort so a failed rates feed never zeroes the USD figures
-  var REMIT_MARGIN = 0.022; // indicative conversions use a remittance-style rate: market less ~2.2% (1.35 quoted ≈ 1.32 received)
+  var FALLBACK_RATES = {GBP: 0.75}; // last resort so a failed rates feed never zeroes the USD figures
+  var REMIT_MARGIN = 0.032; // calibrated to Remitly GBP→USD (mid 1.3323 vs Remitly 1.2894 on 26 Jul 2026 ≈ 3.2%)
   function loadRates(){
     var cached = null;
     try{ cached = JSON.parse(localStorage.getItem('fm_rates') || 'null'); }catch(e){}
@@ -2431,6 +2442,15 @@ var App = (function(){
       $('pl-month').style.cursor = state.plWeekOffset === 0 ? '' : 'pointer';
     }
     var board = $('pl-board');
+    // Carry-over: the chain starts four weeks before the first visible column
+    // (seeded at zero) so leftover money — or a shortfall — rolls forward.
+    var runningCarry = 0;
+    for(var pc = 4; pc >= 1; pc--){
+      var pw = addWeeksISO(weeks[0], -pc);
+      var pt = weekTotals(pw, state.income, state.planItems, state.bills);
+      state.debtPayments.forEach(function(p){ if(p.kind !== 'borrow' && p.paid_at && fridayOf(p.paid_at.slice(0,10)) === pw){ pt.out[p.currency] = (pt.out[p.currency]||0) + Number(p.amount); } });
+      runningCarry += totalGBP(pt.inc) - totalGBP(pt.out);
+    }
     board.innerHTML = weeks.map(function(w){
       var t = weekTotals(w, state.income, state.planItems, state.bills);
       var incCards = state.income.filter(function(i){ return i.week_date === w; }).map(function(i){
@@ -2494,11 +2514,19 @@ var App = (function(){
         '<div class="wsec">Out</div>' + rolledCards + (billCards + itemCards + debtCards || '') +
         '<button class="addmini" data-act="additem" data-week="' + esc(w) + '">+ item</button>' +
         '<button class="addmini" data-act="adddebtpay" data-week="' + esc(w) + '">+ debt payment</button>' +
-        '<div class="wfoot">' +
-          '<div class="frow"><span class="muted">In</span><span>' + moneyList(t.inc) + '</span></div>' +
-          '<div class="frow"><span class="muted">Out</span><span>' + moneyList(t.out) + '</span></div>' +
-          '<div class="frow"><span class="muted">Remaining</span><span>' + moneyList(t.rem, true) + '</span></div>' +
-        '</div></div>';
+        (function(){
+          var remG = totalGBP(t.inc) - totalGBP(t.out); // after rolled/debt cards adjusted the maps
+          var carriedIn = runningCarry;
+          var remWithCarry = remG + carriedIn;
+          runningCarry = remWithCarry;
+          var remCls = remWithCarry >= 0 ? 'pos' : 'neg';
+          return '<div class="wfoot">' +
+            '<div class="frow"><span class="muted">In</span><span>' + moneyList(t.inc) + '</span></div>' +
+            '<div class="frow"><span class="muted">Out</span><span>' + moneyList(t.out) + '</span></div>' +
+            (Math.abs(carriedIn) > 0.004 ? '<div class="frow"><span class="muted">Carried over</span><span class="' + (carriedIn >= 0 ? 'pos' : 'neg') + '">' + esc(fmtMoney(Math.abs(carriedIn), 'GBP')) + (carriedIn < 0 ? ' short' : '') + '</span></div>' : '') +
+            '<div class="frow"><span class="muted">Remaining</span><span class="' + remCls + '">' + esc(fmtMoney(Math.abs(remWithCarry), 'GBP')) + (remWithCarry < 0 ? ' over' : '') + '</span></div>' +
+          '</div></div>';
+        })();
     }).join('');
     bindBoardDnD();
     if(state.plMode === 'cal') renderCalendar();
