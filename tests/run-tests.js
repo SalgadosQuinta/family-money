@@ -251,7 +251,7 @@ async function cycleSpace(dom, A){
     assert(d.getElementById('expenses-list').innerHTML.includes('Transport'), 'expense list re-rendered');
 
     // --- approxUSD ---
-    assert(Math.abs(A.approxUSD(80,'GBP') - 100) < 0.01, 'approxUSD converts via frankfurter rates');
+    assert(Math.abs(A.approxUSD(80,'GBP') - 97.8) < 0.01, 'approxUSD converts via frankfurter rates less the remittance margin');
     assert(A.approxUSD(50,'XXX') === null, 'an unknown currency returns null gracefully');
   }
 
@@ -684,8 +684,8 @@ async function cycleSpace(dom, A){
     const d = dom.window.document, A = dom.window.App;
 
     // Manual ZWG rate feeds approxUSD
-    assert(Math.abs(A.approxUSD(400,'ZZZ') - 10) < 0.001, 'a manual rate converts (400/40 = $10)');
-    assert(Math.abs(A.approxUSD(80,'GBP') - 100) < 0.01, 'frankfurter rates still preferred where available');
+    assert(Math.abs(A.approxUSD(400,'ZZZ') - 9.78) < 0.001, 'a manual rate converts with the remittance margin (400/40 = $10 market, $9.78 received)');
+    assert(Math.abs(A.approxUSD(80,'GBP') - 97.8) < 0.01, 'frankfurter rates still preferred where available (margin applied)');
 
     // PIN: none set -> not required
     assert(A.pinRequired() === false, 'no PIN set means no lock');
@@ -1877,6 +1877,31 @@ async function cycleSpace(dom, A){
     assert(buf.startsWith('\u00a3') && buf.includes('480'), 'buffer shown natively in the currency it is held in (got ' + buf + ')');
     // net worth still converts via the fallback when the feed is down
     assert(d2.getElementById('d-networth-top').textContent.startsWith('$'), 'net worth stays a single USD figure');
+  }
+
+  console.log('--- GBP-first stacked totals ---');
+  {
+    const fmS = fs.readFileSync(path.join(__dirname,'..','index.html'),'utf8');
+    assert(fmS.includes('function ccyOrder'), 'currency ordering helper present');
+    assert(fmS.includes('mline-main') && fmS.includes('mline-sub'), 'stacked line styles for GBP-over-USD');
+    assert(fmS.includes('REMIT_MARGIN = 0.022'), 'remittance-style margin defined');
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){ w.fetch = mockFetch; w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}})); }});
+    await wait(300);
+    const w = dom.window, d = w.document;
+    // a week with GBP and USD flows: GBP line first, USD beneath; GBP-only weeks show no USD line
+    w.App.state.income = [{id:'iA', person:'Salary', amount:1000, currency:'GBP', week_date:w.App.currentFriday()},
+                          {id:'iB', person:'Egg sales', amount:200, currency:'USD', week_date:w.App.currentFriday()}];
+    w.App.state.planItems = []; w.App.state.bills = []; w.App.state.debtPayments = [];
+    w.App.renderPlanner(); await wait(60);
+    const foot = d.querySelector('#pl-board .wcol.nowweek .wfoot');
+    const ins = foot.querySelectorAll('.frow')[0].querySelectorAll('.mline');
+    assert(ins.length === 2 && ins[0].textContent.startsWith('\u00a3') && ins[1].textContent.startsWith('$'), 'GBP first, USD stacked beneath');
+    assert(ins[0].classList.contains('mline-main') && ins[1].classList.contains('mline-sub'), 'GBP is the primary reference line');
+    w.App.state.income = [{id:'iA', person:'Salary', amount:1000, currency:'GBP', week_date:w.App.currentFriday()}];
+    w.App.renderPlanner(); await wait(60);
+    const ins2 = d.querySelector('#pl-board .wcol.nowweek .wfoot .frow').querySelectorAll('.mline');
+    assert(ins2.length === 1 && ins2[0].textContent.startsWith('\u00a3'), 'no USD line unless something was entered in USD');
   }
 
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');

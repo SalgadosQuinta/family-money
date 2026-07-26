@@ -154,6 +154,8 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
 .wfoot{margin-top:auto;border-top:1px solid var(--line);padding-top:8px;font-size:12px}
 .wfoot .frow{display:flex;justify-content:space-between;gap:8px}
 .wfoot .pos{color:var(--green)} .wfoot .neg{color:var(--red)}
+.mline{display:block;text-align:right}
+.mline-sub{font-size:11px;opacity:.85}
 .monthnav{display:flex;align-items:center;gap:10px}
 .monthnav .m{font-weight:650;min-width:130px;text-align:center}
 .addmini{appearance:none;border:1px dashed var(--line);background:none;color:var(--muted);border-radius:8px;
@@ -1456,11 +1458,15 @@ var App = (function(){
 
   function approxUSD(amount, ccy){
     if(ccy === 'USD') return Number(amount) || 0;
-    if(state.rates && state.rates.rates && state.rates.rates[ccy]) return (Number(amount) || 0) / state.rates.rates[ccy];
-    var man = (state.settings && state.settings.manual_rates) || {};
-    if(man[ccy] > 0) return (Number(amount) || 0) / man[ccy];
-    if(FALLBACK_RATES[ccy]) return (Number(amount) || 0) / FALLBACK_RATES[ccy];
-    return null;
+    var raw = null;
+    if(state.rates && state.rates.rates && state.rates.rates[ccy]) raw = (Number(amount) || 0) / state.rates.rates[ccy];
+    else {
+      var man = (state.settings && state.settings.manual_rates) || {};
+      if(man[ccy] > 0) raw = (Number(amount) || 0) / man[ccy];
+      else if(FALLBACK_RATES[ccy]) raw = (Number(amount) || 0) / FALLBACK_RATES[ccy];
+    }
+    if(raw === null) return null;
+    return raw * (1 - REMIT_MARGIN); // what a remittance company would actually give
   }
 
   /* ---------------- session + API ---------------- */
@@ -1547,7 +1553,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v59';
+  var APP_BUILD = 'v60';
   try{ window.APP_BUILD_PUBLIC = APP_BUILD; }catch(e){}
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
@@ -2119,6 +2125,7 @@ var App = (function(){
       .catch(function(){ state.settings = {}; });
   }
   var FALLBACK_RATES = {GBP: 0.79}; // last resort so a failed rates feed never zeroes the USD figures
+  var REMIT_MARGIN = 0.022; // indicative conversions use a remittance-style rate: market less ~2.2% (1.35 quoted ≈ 1.32 received)
   function loadRates(){
     var cached = null;
     try{ cached = JSON.parse(localStorage.getItem('fm_rates') || 'null'); }catch(e){}
@@ -2323,7 +2330,7 @@ var App = (function(){
       $('d-debt-top').textContent = Object.keys(dtot).length ? usdStr(toUSD(dtot)) : 'None';
       var nwU = toUSD(netWorth());
       $('d-networth-top').textContent = usdStr(nwU);
-      $('d-networth-sub').textContent = (nwU.complete) ? 'approx, in USD' : 'approx, in USD · * a currency without a rate is excluded — set it in Admin';
+      $('d-networth-sub').textContent = (nwU.complete) ? 'approx, remittance-style rate' : 'approx, in USD · * a currency without a rate is excluded — set it in Admin';
     }
     if($('d-today2')) $('d-today2').textContent = '';
 
@@ -2395,12 +2402,19 @@ var App = (function(){
     var d = new Date(iso + 'T00:00:00');
     return d.toLocaleDateString('en-GB', {day:'2-digit', month:'short'});
   }
+  function ccyOrder(keys){
+    // GBP is the reference currency; USD follows beneath; anything else after.
+    var rank = {GBP:0, USD:1};
+    return keys.slice().sort(function(a,b){ return (rank[a] !== undefined ? rank[a] : 9) - (rank[b] !== undefined ? rank[b] : 9); });
+  }
   function moneyList(obj, cls){
-    return Object.keys(obj).map(function(c){
+    var keys = ccyOrder(Object.keys(obj).filter(function(c){ return Math.abs(obj[c]) > 0.004; }));
+    if(!keys.length) return '<span class="muted">—</span>';
+    return keys.map(function(c, i){
       var v = obj[c];
-      var k = cls ? (v >= 0 ? 'pos' : 'neg') : '';
-      return '<span class="' + k + '">' + esc(fmtMoney(Math.abs(v), c)) + (cls && v < 0 ? ' over' : '') + '</span>';
-    }).join(' · ') || '<span class="muted">—</span>';
+      var k = (cls ? (v >= 0 ? 'pos' : 'neg') : '') + (i > 0 ? ' mline-sub' : ' mline-main');
+      return '<span class="mline ' + k + '">' + esc(fmtMoney(Math.abs(v), c)) + (cls && v < 0 ? ' over' : '') + '</span>';
+    }).join('');
   }
 
   function renderPlanner(){
@@ -3613,9 +3627,9 @@ var App = (function(){
       var ccys = Object.keys(c.net);
       if(!ccys.length) return '';
       return '<div class="item"><div><strong>' + esc(monthLabel(ym)) + '</strong>' +
-        '<div class="small">In <span style="color:var(--green)">' + esc(Object.keys(c.inc).map(function(k){ return fmtMoney(c.inc[k],k); }).join(' · ') || '—') + '</span>' +
-        ' · Out ' + esc(Object.keys(c.out).map(function(k){ return fmtMoney(c.out[k],k); }).join(' · ') || '—') +
-        ' · Debt paid ' + esc(Object.keys(c.debt).map(function(k){ return fmtMoney(c.debt[k],k); }).join(' · ') || '—') + '</div></div>' +
+        '<div class="small">In <span style="color:var(--green)">' + esc(ccyOrder(Object.keys(c.inc)).map(function(k){ return fmtMoney(c.inc[k],k); }).join(' · ') || '—') + '</span>' +
+        ' · Out ' + esc(ccyOrder(Object.keys(c.out)).map(function(k){ return fmtMoney(c.out[k],k); }).join(' · ') || '—') +
+        ' · Debt paid ' + esc(ccyOrder(Object.keys(c.debt)).map(function(k){ return fmtMoney(c.debt[k],k); }).join(' · ') || '—') + '</div></div>' +
         '<div class="amount">' + ccys.map(function(k){
           var v = c.net[k];
           return '<span class="' + (v >= 0 ? '' : 'overdue') + '">' + esc((v >= 0 ? '+' : '−') + fmtMoney(Math.abs(v), k)) + '</span>';
