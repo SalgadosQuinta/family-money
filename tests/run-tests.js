@@ -1413,8 +1413,15 @@ async function cycleSpace(dom, A){
     assert(chk && chk.periods === 12, 'required payment clears in exactly the target periods');
     assert(A.requiredPayment(1000, 10, 0, 12) === null, 'past date (0 periods) returns null');
     assert(A.periodsUntil(A.todayISO(), 12) === 0, 'today or earlier yields zero periods');
-    const wN = A.periodsUntil('2027-02-01', 52), mN = A.periodsUntil('2027-02-01', 12);
-    assert(wN > mN * 4 && wN < mN * 4.7, 'weekly periods roughly 4.3x monthly to the same date');
+    // Date-robust: pick a target a whole number of weeks out so the comparison
+    // does not depend on where in the month today happens to fall. The old
+    // fixed date failed whenever today's day-of-month exceeded the target's,
+    // because the month count rounds down while the week count does not.
+    const far = new Date(Date.now() + 182*86400000).toISOString().slice(0,10);
+    const wN = A.periodsUntil(far, 52), mN = A.periodsUntil(far, 12);
+    assert(wN === 26, 'weekly periods count whole weeks to the target (' + wN + ')');
+    assert(mN >= 5 && mN <= 6, 'monthly periods land on 5 or 6 depending on day-of-month (' + mN + ')');
+    assert(wN > mN * 4 && wN < mN * 5.4, 'weekly periods run roughly 4.3-5.2x monthly, per calendar rounding');
 
     // UI: mode toggle, multi-debt totals per currency
     d.querySelector('#tabs button[data-view="debts"]').click();
@@ -2177,6 +2184,68 @@ async function cycleSpace(dom, A){
     assert(d.getElementById('dm-ai').style.display === 'none', 'the banner clears on a normal Add debt');
     assert(d.getElementById('dm-title').textContent === 'Add debt', 'and the title resets');
     DB.debts = []; DB.bills = [];
+  }
+
+  console.log('--- Mark income received ---');
+  {
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){
+        // The shared mock serves fam_income as empty; this block needs real rows,
+        // so it layers its own intercept the way the other blocks do.
+        w.fetch = function(url, opts){
+          opts = opts || {};
+          if(String(url).includes('/rest/v1/fam_income')){
+            if(opts.method === 'PATCH'){
+              const id = /id=eq\.([^&]+)/.exec(url)[1];
+              Object.assign(DB.income.find(x => x.id === id), JSON.parse(opts.body));
+              return Promise.resolve({ok:true, status:204, text:()=>Promise.resolve('')});
+            }
+            return Promise.resolve({ok:true, status:200,
+              text:()=>Promise.resolve(JSON.stringify(DB.income)), json:()=>Promise.resolve(DB.income)});
+          }
+          return mockFetch(url, opts);
+        };
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}}));
+      }});
+    await wait(150);
+    const d = dom.window.document, A = dom.window.App;
+    DB.income = [{id:'inc1', person:'Rodney LH', amount:20000, currency:'GBP',
+      on_date:plusDays(4), week_date:plusDays(4), received_at:null, note:null, space:'family'}];
+    DB.bills = []; DB.planner = []; DB.debts = []; DB.debtPayments = [];
+    await A.boot(); await wait(150);
+
+    d.querySelector('button[data-view="income"]').click(); await wait(120);
+    const btn = d.querySelector('button[data-act="receive"][data-id="inc1"]');
+    assert(btn, 'outstanding income offers Mark received');
+    btn.click(); await wait(80);
+    assert(d.getElementById('received-modal').classList.contains('open'), 'the modal opens');
+    assert(/Rodney LH/.test(d.getElementById('rm-name').textContent), 'the modal names the payment');
+    assert(d.getElementById('rm-date').value, 'the date defaults to today');
+
+    // The reported bug: this threw "Cannot read properties of null (reading 'classList')"
+    // AFTER the PATCH had already saved, so the money was recorded but the modal
+    // stayed open showing an error.
+    let thrown = null;
+    dom.window.addEventListener('error', e => { thrown = e.error || e.message; });
+    d.getElementById('rm-save').click(); await wait(250);
+
+    assert(!thrown, 'marking received does not throw (' + (thrown && thrown.message) + ')');
+    const err = d.getElementById('rm-err');
+    assert(err.style.display === 'none' || !err.textContent, 'no error is shown for an action that succeeded');
+    assert(!d.getElementById('received-modal').classList.contains('open'), 'the modal closes');
+    assert(DB.income[0].received_at, 'the receipt is saved');
+
+    // modalClose must be safe however it is called
+    A.modalClose ? null : null;
+    const mc = dom.window.eval('App.modalClose || null');
+    if(mc){
+      d.getElementById('received-modal').classList.add('open');
+      dom.window.eval('App.modalClose()');
+      assert(!d.getElementById('received-modal').classList.contains('open'),
+        'modalClose() with no argument closes whatever is open rather than throwing');
+      dom.window.eval('App.modalClose("no-such-modal-id")');
+      assert(true, 'modalClose with an unknown id does not throw');
+    }
   }
 
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');

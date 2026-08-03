@@ -1644,7 +1644,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v64';
+  var APP_BUILD = 'v65';
   try{ window.APP_BUILD_PUBLIC = APP_BUILD; }catch(e){}
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
@@ -2202,8 +2202,8 @@ var App = (function(){
     var btn = $('rm-save'); btn.disabled = true;
     apiJSON('/rest/v1/fam_income?id=eq.' + i.id, {method:'PATCH', headers:{'Prefer':'return=minimal'},
       body: JSON.stringify({received_at:d, received_by:state.session.user.id, note:($('rm-note').value.trim() || null)})})
-      .then(function(){ modalClose(); toast('Marked received'); return loadIncomeAll(); })
-      .then(function(){ renderIncome(); })
+      .then(function(){ modalClose('received-modal'); toast('Marked received'); return loadIncomeAll(); })
+      .then(function(){ renderIncome(); renderPlanner(); renderDashboard(); })
       .catch(function(e){ $('rm-err').textContent = e.message; $('rm-err').style.display = ''; })
       .then(function(){ btn.disabled = false; });
   }
@@ -4347,8 +4347,17 @@ var App = (function(){
 
   /* ---------------- modals ---------------- */
   var openModal = null;
-  function modalOpen(id){ $(id).classList.add('open'); openModal = id; }
-  function modalClose(id){ $(id).classList.remove('open'); if(openModal === id) openModal = null; }
+  function modalOpen(id){ var el = $(id); if(!el) return; el.classList.add('open'); openModal = id; }
+  /* Closing must never throw: a failed close would abort the promise chain of
+     whatever just succeeded, leaving the user staring at an error for an
+     action that actually worked. With no id, close the modal that is open. */
+  function modalClose(id){
+    var target = id || openModal;
+    var el = target ? $(target) : null;
+    if(el) el.classList.remove('open');
+    else document.querySelectorAll('.modal-wrap.open').forEach(function(w){ w.classList.remove('open'); });
+    if(!id || openModal === id) openModal = null;
+  }
 
   function fillCurrencySelects(){
     ['bm-currency','ex-currency','pim-currency','im-currency','dm-currency','am-currency','bud-currency','asm-currency'].forEach(function(id){

@@ -177,3 +177,33 @@ requests. Helper `cycleSpace(dom, A)` answers PIN prompts with `1234`.
 - **Secrets:** the anon key in the client is public by design (RLS protects
   data). Personal access tokens (GitHub, Supabase) must be revoked after use.
 - **Backups & restore:** see `BACKUP-AND-RESILIENCE.md`.
+
+## Mark received threw "Cannot read properties of null" (v65)
+
+`confirmReceived()` called `modalClose()` with **no argument**. `$(undefined)`
+returns null, so `.classList` threw. The PATCH had already succeeded, so the
+income *was* marked received — the user saw a red error and a modal that would
+not close for an action that had actually worked. The worst shape of bug: the
+data and the UI disagreed.
+
+Two fixes:
+
+1. The call site passes `'received-modal'`.
+2. `modalClose()` is now total — with no id it closes whichever modal is open
+   (falling back to sweeping `.modal-wrap.open`), and an unknown id is a no-op
+   rather than a throw. `modalOpen()` likewise returns quietly on a missing
+   element. A close that throws aborts the promise chain of whatever just
+   succeeded, which is how a cosmetic fault became an apparent failure.
+
+Marking received now also re-renders the planner and dashboard, since the
+figure feeds both (and the GTD console's money tiles read the same table).
+
+**Test note:** the shared `mockFetch` serves `fam_income` as an empty array, so
+any block needing real income rows must layer its own intercept in
+`beforeParse`.
+
+**Also fixed:** `periodsUntil` test hard-coded 2027-02-01 and asserted a
+4–4.7x weekly/monthly ratio. Whenever today's day-of-month exceeds the
+target's, the month count rounds down and the ratio reaches 5.2, so the test
+failed purely by calendar position. Now uses a rolling target and a band that
+reflects the rounding.
