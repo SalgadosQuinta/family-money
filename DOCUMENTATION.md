@@ -207,3 +207,22 @@ any block needing real income rows must layer its own intercept in
 target's, the month count rounds down and the ratio reaches 5.2, so the test
 failed purely by calendar position. Now uses a rolling target and a band that
 reflects the rounding.
+
+## Pay a bill from the planner (v66)
+
+The planner is where payment decisions actually get made, but bill cards there
+carried no pay action — overdue rolled bills showed only a red text line, and
+bills due later in the visible weeks had nothing either. Only planner *items*
+had "Mark paid". Paying a bill meant leaving for the Bills tab.
+
+Every bill card in the planner now carries **Mark paid**, routed through the
+same `openPaidModal` / `confirmPaid` pair the Bills tab uses. That matters: the
+recurrence roll-forward, the `fam_bill_payments` record and the archive-on-
+one-off behaviour are defined once, so paying from the planner cannot drift
+from paying anywhere else. `confirmPaid` already calls `renderAll()`, which
+includes `renderPlanner`, so the board updates in place.
+
+Covered by a full click-through test: overdue and current bills both offer the
+button, clicking opens the modal with the right bill and amount, saving writes
+the payment, a recurring bill rolls forward and stays live, and a one-off is
+archived and leaves the board.

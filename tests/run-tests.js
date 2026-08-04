@@ -2248,6 +2248,65 @@ async function cycleSpace(dom, A){
     }
   }
 
+  console.log('--- Planner: pay a bill, including an overdue one ---');
+  {
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){
+        w.fetch = mockFetch;
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}}));
+      }});
+    await wait(150);
+    const d = dom.window.document, A = dom.window.App;
+    DB.bills = [
+      {id:'ob1', name:'Overdue rates', amount:250, currency:'GBP', due_date:plusDays(-11),
+       recurrence:'monthly', category:'Utilities', responsible:null, notes:null, receipt_path:null, archived:false},
+      {id:'cb1', name:'Broadband', amount:40, currency:'GBP', due_date:plusDays(3),
+       recurrence:'monthly', category:'Internet', responsible:null, notes:null, receipt_path:null, archived:false},
+      {id:'ob2', name:'One-off overdue', amount:75, currency:'GBP', due_date:plusDays(-4),
+       recurrence:'none', category:'Other', responsible:null, notes:null, receipt_path:null, archived:false}
+    ];
+    DB.planner = []; DB.income = []; DB.debts = []; DB.debtPayments = []; DB.payments = [];
+    await A.boot(); await wait(150);
+    d.querySelector('button[data-view="planner"]').click(); await wait(150);
+
+    const board = d.getElementById('pl-board');
+    assert(/Overdue — rolled over/.test(board.innerHTML), 'overdue bills roll into the current week');
+
+    // The reported gap: an overdue bill card offered no way to pay it
+    const payOverdue = board.querySelector('.card.rolled[data-id="ob1"] button[data-act="paid"]');
+    assert(payOverdue, 'an overdue bill in the planner offers Mark paid');
+    const payCurrent = board.querySelector('.card[data-id="cb1"] button[data-act="paid"]');
+    assert(payCurrent, 'a bill due later in the planner also offers Mark paid');
+
+    // CLICK-THROUGH: the button must actually be wired, not merely rendered
+    payOverdue.click(); await wait(120);
+    assert(d.getElementById('paid-modal').classList.contains('open'), 'clicking opens the payment modal');
+    assert(/Overdue rates/.test(d.getElementById('pm-billname').textContent), 'the modal names the right bill');
+    assert(String(d.getElementById('pm-amount').value) === '250', 'the amount is prefilled from the bill');
+    assert(/next due date will be/.test(d.getElementById('pm-rollnote').textContent), 'recurring bills explain the roll forward');
+
+    const before = (DB.payments || []).length;
+    d.getElementById('pm-save').click(); await wait(300);
+    assert(!d.getElementById('paid-modal').classList.contains('open'), 'the modal closes on success');
+    assert((DB.payments || []).length === before + 1, 'a payment record is written');
+    const rec = DB.payments[DB.payments.length - 1];
+    assert(rec.bill_id === 'ob1' && Number(rec.amount) === 250, 'the payment is against the right bill');
+    const rolled = DB.bills.find(b => b.id === 'ob1');
+    assert(rolled.due_date > plusDays(-11), 'a recurring bill rolls its due date forward rather than being archived');
+    assert(!rolled.archived, 'a recurring bill stays live');
+    assert(!/data-id="ob1"[^>]*>[\s\S]{0,400}OVERDUE/.test(d.getElementById('pl-board').innerHTML.split('data-id="ob1"')[0] || ''),
+      'the planner re-renders after payment');
+
+    // A one-off overdue bill should be completed, not rolled
+    const payOneOff = d.getElementById('pl-board').querySelector('.card[data-id="ob2"] button[data-act="paid"]');
+    assert(payOneOff, 'the one-off overdue bill is payable too');
+    payOneOff.click(); await wait(120);
+    assert(/marked complete/.test(d.getElementById('pm-rollnote').textContent), 'a one-off bill says it will be completed');
+    d.getElementById('pm-save').click(); await wait(300);
+    assert(DB.bills.find(b => b.id === 'ob2').archived === true, 'the one-off bill is archived once paid');
+    assert(!d.getElementById('pl-board').innerHTML.includes('One-off overdue'), 'and disappears from the planner');
+  }
+
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

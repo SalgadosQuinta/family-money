@@ -1644,7 +1644,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v65';
+  var APP_BUILD = 'v66';
   try{ window.APP_BUILD_PUBLIC = APP_BUILD; }catch(e){}
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
@@ -2577,7 +2577,8 @@ var App = (function(){
         return '<div class="card bill-card' + (od ? ' od' : '') + '" draggable="true" data-kind="bill" data-id="' + esc(b.id) + '">' +
           '<div class="crow"><span class="ctitle">' + (od ? '<span class="badge od">OVERDUE</span> ' : '') + esc(b.name) + '</span>' +
           '<span class="amount' + (od ? ' overdue' : '') + '">' + esc(fmtMoney(b.amount, b.currency)) + '</span></div>' +
-          '<div class="cactions"><span class="small' + (od ? ' red' : ' muted') + '">bill · ' + (od ? Math.abs(daysUntil(b.due_date)) + 'd overdue — was due ' : 'due ') + esc(fmtShort(b.due_date)) + '</span></div></div>';
+          '<div class="cactions"><span class="small' + (od ? ' red' : ' muted') + '">bill · ' + (od ? Math.abs(daysUntil(b.due_date)) + 'd overdue — was due ' : 'due ') + esc(fmtShort(b.due_date)) + '</span>' +
+          '<button class="paidtick" data-act="paid" data-id="' + esc(b.id) + '">Mark paid</button></div></div>';
       }).join('');
       var debtCards = state.debtPayments.filter(function(p){ return p.kind !== 'borrow' && p.paid_at && fridayOf(p.paid_at.slice(0,10)) === w; }).map(function(p){
         t.out[p.currency] = (t.out[p.currency]||0) + Number(p.amount);
@@ -2625,7 +2626,8 @@ var App = (function(){
               return '<div class="card bill-card rolled od" draggable="true" data-kind="bill" data-id="' + esc(b.id) + '">' +
                 '<div class="crow"><span class="ctitle"><span class="badge od">OVERDUE</span> ' + esc(b.name) + ' <span class="badge roll">from ' + esc(fmtShort(fridayOf(b.due_date))) + '</span></span>' +
                 '<span class="amount overdue">' + esc(fmtMoney(b.amount, b.currency)) + '</span></div>' +
-                '<div class="cactions"><span class="small red">bill · ' + Math.abs(daysUntil(b.due_date)) + 'd overdue — was due ' + esc(fmtShort(b.due_date)) + '</span></div></div>';
+                '<div class="cactions"><span class="small red">bill · ' + Math.abs(daysUntil(b.due_date)) + 'd overdue — was due ' + esc(fmtShort(b.due_date)) + '</span>' +
+                '<button class="paidtick" data-act="paid" data-id="' + esc(b.id) + '">Mark paid</button></div></div>';
             }).join('') +
             rolledItems.map(function(i){
               t.out[i.currency] = (t.out[i.currency]||0) + Number(i.amount);
@@ -4701,6 +4703,13 @@ var App = (function(){
           return;
         }
         if(act === 'addinc'){ openIncomeModal(null, b.getAttribute('data-week')); return; }
+        if(act === 'paid'){
+          // Same modal the Bills tab uses, so recurrence rolling and the
+          // payment record behave identically wherever the bill is paid from.
+          var pb = state.bills.find(function(x){ return x.id === b.getAttribute('data-id'); });
+          if(pb) openPaidModal(pb);
+          return;
+        }
         if(act === 'ptick'){
           var id = b.getAttribute('data-id');
           var it = state.planItems.find(function(x){ return x.id === id; });
