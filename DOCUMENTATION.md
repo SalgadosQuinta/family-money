@@ -261,3 +261,22 @@ views; an unchanged pull is a no-op. Concurrent edits are last-write-wins.
 `App.projectTotals`. Also fixed a pre-existing test that asserted the debt
 repayment appeared as a bare substring in the week Out cell — that cell shows
 the week's whole total, so the assertion now checks the arithmetic instead.
+
+## Project pickers on every money form (v68)
+
+Bills already had a project picker; planner items, income and expenses now do
+too, so everything that makes up a project's budget-vs-actual can actually be
+tagged. All three reuse `fillProjectSelect()`, which hides the control (and its
+label) where no projects apply, and keeps a finished project in the list when
+the row is already tagged to it, so re-saving never silently drops the tag.
+
+The loaders all use `select=*`, so `project_id` needed no query changes.
+
+One asymmetry worth knowing: the expenses form is inline rather than a modal,
+so it has no open-time hook. Its picker is refreshed from `renderProjects()`
+instead, which runs whenever the project list changes.
+
+**Totals stay per currency.** `projectTotals()` sums only rows matching the
+project's own currency; a USD expense on a GBP project is not added at face
+value. Covered by a regression test — silently mixing currencies would be a
+plausible and expensive mistake.

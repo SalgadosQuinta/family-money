@@ -560,6 +560,8 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
         <div><label class="f" for="ex-note">Note</label>
           <input id="ex-note" placeholder="Optional"></div>
       </div>
+      <label class="f" for="ex-project">Project</label>
+      <select id="ex-project"><option value="">&mdash; none &mdash;</option></select>
       <label class="f" for="ex-receipt">Receipt photo</label>
       <input id="ex-receipt" type="file" accept="image/*">
       <div class="btnrow"><button class="btn primary" id="ex-save-btn">Add expense</button></div>
@@ -976,6 +978,8 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
     <input id="pim-day" type="date">
     <label class="f" for="pim-account">Account</label>
     <select id="pim-account" class="acct-select"></select>
+    <label class="f" for="pim-project">Project</label>
+    <select id="pim-project"><option value="">&mdash; none &mdash;</option></select>
     <label class="f" for="pim-note">Note</label>
     <input id="pim-note" placeholder="Optional">
     <div id="pim-err" class="small" style="color:var(--red);margin-top:8px;display:none"></div>
@@ -1016,6 +1020,8 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
     <input id="im-day" type="date">
     <label class="f" for="im-account">Into account</label>
     <select id="im-account" class="acct-select"></select>
+    <label class="f" for="im-project">Project</label>
+    <select id="im-project"><option value="">&mdash; none &mdash;</option></select>
     <div id="im-err" class="small" style="color:var(--red);margin-top:8px;display:none"></div>
     <div class="btnrow">
       <button class="btn danger" id="im-del" style="margin-right:auto;display:none">Delete this week</button>
@@ -1732,7 +1738,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v67';
+  var APP_BUILD = 'v68';
   try{ window.APP_BUILD_PUBLIC = APP_BUILD; }catch(e){}
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
@@ -2941,6 +2947,7 @@ var App = (function(){
     $('pim-recur').value = item ? (item.recurrence || 'none') : 'none';
     $('pim-day').value = item && item.on_date ? item.on_date : (arguments.length > 2 && arguments[2] ? arguments[2] : '');
     $('pim-account').value = item && item.account_id ? item.account_id : '';
+    fillProjectSelect('pim-project', item && item.project_id);
     $('pim-note').value = item ? (item.note || '') : '';
     $('pim-del').style.display = item ? '' : 'none';
     var mv = $('pim-move'); mv.style.display = item ? '' : 'none';
@@ -2957,7 +2964,8 @@ var App = (function(){
       on_date:($('pim-day').value || null),
       note:($('pim-note').value.trim() || null),
       recurrence:$('pim-recur').value,
-      account_id:($('pim-account').value || null)};
+      account_id:($('pim-account').value || null),
+      project_id:($('pim-project') ? ($('pim-project').value || null) : null)};
     var p = state.editingItem
       ? apiJSON('/rest/v1/fam_planner_items?id=eq.' + state.editingItem.id, {method:'PATCH', body:JSON.stringify(body)})
       : apiJSON('/rest/v1/fam_planner_items', {method:'POST', headers:{'Prefer':'return=minimal'}, body:JSON.stringify(spaceBody(body))});
@@ -2978,6 +2986,7 @@ var App = (function(){
     var dl = $('person-list'); dl.innerHTML = '';
     var seen = {};
     state.income.forEach(function(i){ if(!seen[i.person]){ seen[i.person]=1; var o=document.createElement('option'); o.value=i.person; dl.appendChild(o);} });
+    fillProjectSelect('im-project', inc && inc.project_id);
     $('im-del').style.display = inc ? '' : 'none';
     $('im-err').style.display = 'none';
     modalOpen('inc-modal');
@@ -2990,7 +2999,8 @@ var App = (function(){
       week_date:($('im-day').value ? fridayOf($('im-day').value) : $('im-week').value),
       on_date:($('im-day').value || null),
       recurrence:$('im-recur').value,
-      account_id:($('im-account').value || null)};
+      account_id:($('im-account').value || null),
+      project_id:($('im-project') ? ($('im-project').value || null) : null)};
     var p = state.editingIncome
       ? apiJSON('/rest/v1/fam_income?id=eq.' + state.editingIncome.id, {method:'PATCH', body:JSON.stringify(body)})
       : apiJSON('/rest/v1/fam_income', {method:'POST', headers:{'Prefer':'return=minimal'}, body:JSON.stringify(spaceBody(body))});
@@ -3519,6 +3529,9 @@ var App = (function(){
   var PROJ_STATUS = {active:'Active', on_hold:'On hold', done:'Done', cancelled:'Cancelled'};
 
   function renderProjects(){
+    // The expenses form is inline rather than a modal, so its picker has no
+    // open-time hook: refresh it whenever the project list itself changes.
+    if($('ex-project')) fillProjectSelect('ex-project', $('ex-project').value || null);
     var host = $('projects-list'); if(!host) return;
     var tab = $('tab-projects');
     if(tab) tab.style.display = projectsAvailable() ? '' : 'none';
@@ -4874,6 +4887,7 @@ var App = (function(){
         spent_at: $('ex-date').value || todayISO(),
         note:($('ex-note').value.trim() || null),
         account_id:($('ex-account').value || null),
+        project_id:($('ex-project') ? ($('ex-project').value || null) : null),
         receipt_path: receiptPath
       };
       return apiJSON('/rest/v1/fam_expenses', {method:'POST', headers:{'Prefer':'return=minimal'}, body:JSON.stringify(spaceBody(body))});
@@ -5431,7 +5445,7 @@ var App = (function(){
     approxUSD:approxUSD, signIn:signIn, signOut:signOut, api:api, apiJSON:apiJSON,
     loadSession:loadSession, saveSession:saveSession,
     state:state, init:init, boot:boot, todayISO:todayISO,
-    renderAll:renderAll, renderProjects:renderProjects, projectTotals:projectTotals, projectRows:projectRows, milestonesOf:milestonesOf, projectsAvailable:projectsAvailable, fridayOf:fridayOf, weeksOfMonth:weeksOfMonth, weeksWindow:weeksWindow, currentFriday:currentFriday, addWeeksISO:addWeeksISO, weekTotals:weekTotals, shiftMonth:shiftMonth,
+    renderAll:renderAll, renderProjects:renderProjects, openItemModal:openItemModal, openIncomeModal:openIncomeModal, modalClose:modalClose, fillProjectSelect:fillProjectSelect, projectTotals:projectTotals, projectRows:projectRows, milestonesOf:milestonesOf, projectsAvailable:projectsAvailable, fridayOf:fridayOf, weeksOfMonth:weeksOfMonth, weeksWindow:weeksWindow, currentFriday:currentFriday, addWeeksISO:addWeeksISO, weekTotals:weekTotals, shiftMonth:shiftMonth,
     moveCard:moveCard, mapCaptureResponse:mapCaptureResponse, renderPlanner:renderPlanner,
     accountBalance:accountBalance, payoffProjection:payoffProjection, payoffPlan:payoffPlan, renderPayback:renderPayback, fillPaybackSelect:fillPaybackSelect,
     periodsUntil:periodsUntil, requiredPayment:requiredPayment, renderPaybackDate:renderPaybackDate, setPaybackMode:setPaybackMode, monthlyClose:monthlyClose,

@@ -2339,6 +2339,28 @@ async function cycleSpace(dom, A){
               return Promise.resolve({ok:true,status:204,text:()=>Promise.resolve('')}); }
             return j(DB.projects);
           }
+          // The shared mock only serves GETs for these; this block writes too.
+          const writable = [['fam_planner_items','planner'],['fam_income','income'],['fam_expenses','expenses']];
+          for(const [tbl, key] of writable){
+            if(u.includes('/rest/v1/' + tbl)){
+              DB[key] = DB[key] || [];
+              if(opts.method === 'POST'){
+                DB[key].push(Object.assign({id: tbl + (DB[key].length+1)}, JSON.parse(opts.body)));
+                return Promise.resolve({ok:true,status:201,text:()=>Promise.resolve('')});
+              }
+              if(opts.method === 'PATCH'){
+                const id = /id=eq\.([^&]+)/.exec(u)[1];
+                const row = DB[key].find(x=>x.id===id); if(row) Object.assign(row, JSON.parse(opts.body));
+                return Promise.resolve({ok:true,status:204,text:()=>Promise.resolve('')});
+              }
+              if(opts.method === 'DELETE'){
+                const id = /id=eq\.([^&]+)/.exec(u)[1];
+                DB[key] = DB[key].filter(x=>x.id!==id);
+                return Promise.resolve({ok:true,status:204,text:()=>Promise.resolve('')});
+              }
+              return j(DB[key]);
+            }
+          }
           if(u.includes('/rest/v1/fam_project_milestones')){
             if(opts.method === 'POST'){ const b = JSON.parse(opts.body); b.id = 'new-ms'; DB.milestones.push(b);
               return Promise.resolve({ok:true,status:201,text:()=>Promise.resolve('')}); }
@@ -2428,8 +2450,64 @@ async function cycleSpace(dom, A){
     d.getElementById('bill-add-btn').click(); await wait(120);
     const sel = d.getElementById('bm-project');
     assert(sel, 'the bill form offers a project picker');
-    assert(/Borehole at the farm/.test(sel.innerHTML), 'open projects areselectable');
+    assert(/Borehole at the farm/.test(sel.innerHTML), 'open projects are selectable');
     assert(!/Finished thing/.test(sel.innerHTML), 'finished projects are not offered for new tagging');
+    A.modalClose('bill-modal');
+
+    // Planner item
+    d.querySelector('button[data-view="planner"]').click(); await wait(150);
+    A.openItemModal(null, A.currentFriday());
+    await wait(120);
+    const pimSel = d.getElementById('pim-project');
+    assert(pimSel, 'the planner item form offers a project picker');
+    assert(/Borehole at the farm/.test(pimSel.innerHTML), 'open projects listed on planner items');
+    pimSel.value = 'pj1';
+    d.getElementById('pim-name').value = 'Drill bit hire';
+    d.getElementById('pim-amount').value = '150';
+    d.getElementById('pim-save').click(); await wait(300);
+    const newItem = DB.planner.find(x => (x.title || x.name) === 'Drill bit hire');
+    assert(newItem, 'the planner item saves');
+    assert(newItem.project_id === 'pj1', 'and carries the project tag');
+
+    // Income
+    A.openIncomeModal(null, A.currentFriday());
+    await wait(120);
+    const imSel = d.getElementById('im-project');
+    assert(imSel, 'the income form offers a project picker');
+    imSel.value = 'pj1';
+    d.getElementById('im-person').value = 'Borehole grant';
+    d.getElementById('im-amount').value = '2000';
+    d.getElementById('im-save').click(); await wait(300);
+    const newInc = DB.income.find(x => x.person === 'Borehole grant');
+    assert(newInc, 'the income saves');
+    assert(newInc.project_id === 'pj1', 'and carries the project tag');
+
+    // Expense (inline form, not a modal)
+    d.querySelector('button[data-view="expenses"]').click(); await wait(150);
+    const exSel = d.getElementById('ex-project');
+    assert(exSel, 'the expense form offers a project picker');
+    assert(/Borehole at the farm/.test(exSel.innerHTML), 'open projects listed on expenses');
+    exSel.value = 'pj1';
+    d.getElementById('ex-amount').value = '95';
+    d.getElementById('ex-currency').value = 'GBP';
+    d.getElementById('ex-save-btn').click(); await wait(350);
+    const newEx = (DB.expenses || []).find(x => Number(x.amount) === 95);
+    assert(newEx, 'the expense saves');
+    assert(newEx.project_id === 'pj1', 'and carries the project tag');
+
+    // All four kinds now roll into the project's totals
+    d.querySelector('button[data-view="projects"]').click(); await wait(150);
+    const t2 = A.projectTotals(DB.projects.find(p => p.id === 'pj1'));
+    assert(t2.counts.incoming >= 1, 'tagged income counts towards the project');
+    assert(t2.spent === 395, 'tagged expenses count towards spend (got ' + t2.spent + ')');
+    assert(t2.planned >= 1350, 'tagged planner items count towards still-to-pay (got ' + t2.planned + ')');
+
+    // Totals are per currency: a project budgeted in GBP must not silently
+    // absorb a USD row at face value.
+    DB.expenses.push({id:'ex-usd', amount:1000, currency:'USD', spent_at:plusDays(-1), project_id:'pj1'});
+    const t3 = A.projectTotals(DB.projects.find(p => p.id === 'pj1'));
+    assert(t3.spent === 395, 'a USD expense does not inflate the GBP spend figure (got ' + t3.spent + ')');
+    DB.expenses = DB.expenses.filter(x => x.id !== 'ex-usd');
 
     // Filter shows finished work when asked
     d.querySelector('button[data-view="projects"]').click(); await wait(120);
