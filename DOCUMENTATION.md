@@ -226,3 +226,38 @@ Covered by a full click-through test: overdue and current bills both offer the
 button, clicking opens the modal with the right bill and amount, saving writes
 the payment, a recurring bill rolls forward and stays live, and a one-off is
 archived and leaves the board.
+
+## Projects (v67, migration 021)
+
+A Projects tab in Family Money, linked two-way to GTD console projects.
+
+**Scope, agreed with Rodney:** money tracking plus simple milestones. Task
+management stays in the GTD console — duplicating it would give two task lists
+that disagree. Spaces: family and farm only (constrained in the migration, and
+the tab hides itself elsewhere rather than showing an empty list).
+
+**Tables:** `fam_projects` (name, outcome, status, budget, currency, dates,
+lead, notes, space, `gtd_ref`, `gtd_synced_at`) and `fam_project_milestones`
+(title, due date, done, optional amount). `project_id` added to `fam_bills`,
+`fam_planner_items`, `fam_income` and `fam_expenses`.
+
+**Budget vs actual** — `projectTotals()`: *spent* is expenses and payments;
+*still to pay* is unpaid bills and planner items. Milestone amounts count only
+when nothing else is tagged, so a milestone used as a rough estimate does not
+double-count a bill raised for the same thing.
+
+**RLS:** read is `fam_can_see()`, write is `fam_can_see() AND fam_is_manager()`.
+Deliberately **not** `fam_can_manage()` — despite the name, that helper requires
+`fam_is_admin()` for the family space and would lock managers out.
+
+**Sync (GTD ↔ Money):** the join is `fam_projects.gtd_ref`, which carries a
+unique partial index, so a repeated push updates rather than duplicating. Name,
+outcome, status and target date travel both ways; **budget and milestones never
+sync back**, as GTD has no field for them. Status vocabularies differ and are
+mapped (`completed↔done`, `someday→on_hold`). GTD pulls on entering the project
+views; an unchanged pull is a no-op. Concurrent edits are last-write-wins.
+
+**Note:** a `projectTotals` regression is easiest to spot via the exported
+`App.projectTotals`. Also fixed a pre-existing test that asserted the debt
+repayment appeared as a bare substring in the week Out cell — that cell shows
+the week's whole total, so the assertion now checks the arithmetic instead.

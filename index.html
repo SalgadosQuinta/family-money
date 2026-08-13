@@ -57,6 +57,23 @@ main{max-width:860px;margin:0 auto;padding:14px}
 .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
 @media(max-width:760px){.grid3{grid-template-columns:1fr}}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.pjcard{border:1px solid var(--line);border-radius:10px;margin-bottom:10px;overflow:hidden}
+.pjcard.open{border-color:var(--brass)}
+.pjhead{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:12px 14px;cursor:pointer}
+.pjhead:hover{background:rgba(255,255,255,.03)}
+.pjname{font-weight:600}
+.pjfig{font-family:var(--mono);font-size:15px}
+.pjfig.red{color:var(--red)}
+.pjgtd{border:1px solid var(--brass);color:var(--brass);border-radius:4px;padding:0 4px;font-size:10px}
+.pjbar{height:4px;background:rgba(255,255,255,.07)}
+.pjbar span{display:block;height:100%}
+.pjbody{padding:0 14px 14px;border-top:1px solid var(--line)}
+.pjgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:12px}
+@media(max-width:640px){.pjgrid{grid-template-columns:1fr}}
+.pjrow{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;padding:5px 0;border-bottom:1px solid var(--line)}
+.pjrow .mono{font-family:var(--mono);font-size:12.5px}
+.mstick{display:flex;gap:7px;align-items:center;cursor:pointer}
+.msdone{text-decoration:line-through;opacity:.6}
 @media(max-width:640px){.grid2{grid-template-columns:1fr}}
 .row{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .item{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;
@@ -367,6 +384,7 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
     <button data-view="planner">Planner</button>
     <button data-view="assets">Assets</button>
     <button data-view="debts">Debts</button>
+    <button data-view="projects" id="tab-projects">Projects</button>
     <button data-view="analysis">Analysis</button>
     <button data-view="admin" id="tab-admin" style="display:none">Admin</button>
   </nav>
@@ -627,6 +645,21 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
   </section>
 
   <!-- DEBTS -->
+  <section id="view-projects" style="display:none">
+    <div class="row" style="margin-bottom:12px">
+      <span class="eyebrow">Projects &mdash; budget, spend and milestones</span>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select id="proj-filter" style="width:auto;padding:6px 8px;font-size:13px">
+          <option value="open">Show: open</option>
+          <option value="all">Show: all</option>
+          <option value="done">Show: finished</option>
+        </select>
+        <button class="btn primary" id="proj-add-btn">Add project</button>
+      </div>
+    </div>
+    <div class="panel"><div id="projects-list"><div class="empty">Loading&hellip;</div></div></div>
+  </section>
+
   <section id="view-debts" style="display:none">
     <div class="row" style="margin-bottom:12px">
       <span class="eyebrow">Credit cards, loans &amp; long-term owing</span>
@@ -804,6 +837,8 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
     </div>
     <label class="f" for="bm-account">Paid from account</label>
     <select id="bm-account" class="acct-select"></select>
+    <label class="f" for="bm-project">Project</label>
+    <select id="bm-project"><option value="">&mdash; none &mdash;</option></select>
     <label class="f" for="bm-notes">Notes</label>
     <textarea id="bm-notes"></textarea>
     <label class="f" for="bm-receipt">Invoice / receipt photo</label>
@@ -833,6 +868,53 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
     </div>
   </div>
 </div>
+<div class="modal-wrap" id="project-modal">
+  <div class="modal">
+    <h3 id="pjm-title">Project</h3>
+    <label>Name</label><input id="pjm-name" placeholder="e.g. Borehole at the farm">
+    <label>Outcome &mdash; what done looks like</label><input id="pjm-outcome" placeholder="Optional">
+    <div class="grid2">
+      <div><label>Budget</label><input id="pjm-budget" type="number" step="0.01" placeholder="Optional"></div>
+      <div><label>Currency</label><select id="pjm-currency"><option>GBP</option><option>USD</option></select></div>
+    </div>
+    <div class="grid2">
+      <div><label>Start</label><input id="pjm-start" type="date"></div>
+      <div><label>Target</label><input id="pjm-target" type="date"></div>
+    </div>
+    <div class="grid2">
+      <div><label>Status</label><select id="pjm-status">
+        <option value="active">Active</option><option value="on_hold">On hold</option>
+        <option value="done">Done</option><option value="cancelled">Cancelled</option></select></div>
+      <div><label>Lead</label><select id="pjm-lead"><option value="">&mdash;</option></select></div>
+    </div>
+    <label>Notes</label><textarea id="pjm-notes" rows="2"></textarea>
+    <div id="pjm-gtd" class="small muted" style="display:none;margin-top:6px"></div>
+    <div class="err" id="pjm-err" style="display:none"></div>
+    <div class="modal-actions">
+      <button class="btn" id="pjm-del" style="margin-right:auto;display:none">Delete</button>
+      <button class="btn ghost" data-close="project-modal">Cancel</button>
+      <button class="btn primary" id="pjm-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-wrap" id="milestone-modal">
+  <div class="modal">
+    <h3 id="msm-title">Milestone</h3>
+    <label>Title</label><input id="msm-title-in" placeholder="e.g. Casing delivered">
+    <div class="grid2">
+      <div><label>Due</label><input id="msm-due" type="date"></div>
+      <div><label>Amount (optional)</label><input id="msm-amount" type="number" step="0.01"></div>
+    </div>
+    <div class="err" id="msm-err" style="display:none"></div>
+    <div class="modal-actions">
+      <button class="btn" id="msm-del" style="margin-right:auto;display:none">Delete</button>
+      <button class="btn ghost" data-close="milestone-modal">Cancel</button>
+      <button class="btn primary" id="msm-save">Save</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-wrap" id="paid-modal">
   <div class="modal">
     <h3>Mark paid</h3>
@@ -1227,6 +1309,12 @@ var App = (function(){
     rates: null,         // frankfurter USD rates {base:'USD', rates:{GBP:..}}
     view: 'dashboard',
     editingBill: null,
+    projects: [],
+    milestones: [],
+    editingProject: null,
+    editingMilestone: null,
+    openProject: null,      // id of the expanded project card
+    projFilter: 'open',
     payingBill: null,
     plMonth: null,        // 'YYYY-MM' shown on the planner board
     income: [],           // fam_income rows for visible range
@@ -1644,7 +1732,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v66';
+  var APP_BUILD = 'v67';
   try{ window.APP_BUILD_PUBLIC = APP_BUILD; }catch(e){}
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
@@ -3348,6 +3436,298 @@ var App = (function(){
   }
 
   /* ---------------- debts ---------------- */
+  /* ============================================================
+     PROJECTS — money tracking plus simple milestones.
+     Task management stays in the GTD console; this side owns budget,
+     spend and milestones. gtd_ref is the join between the two apps.
+     Only family and farm spaces have projects (migration 021 constrains it),
+     so the tab hides itself elsewhere rather than showing an empty list.
+     ============================================================ */
+  /* Shared by every money form that can be tagged to a project. Finished
+     projects are omitted unless the row is already on one, so an old tag is
+     never silently dropped when the form is saved again. */
+  function fillProjectSelect(elId, current){
+    var el = $(elId); if(!el) return;
+    var opts = (state.projects || []).filter(function(p){
+      return p.id === current || (p.status !== 'done' && p.status !== 'cancelled');
+    });
+    el.innerHTML = '<option value="">\u2014 none \u2014</option>' + opts.map(function(p){
+      return '<option value="' + esc(p.id) + '">' + esc(p.name) + '</option>';
+    }).join('');
+    el.value = current || '';
+    // Hide the control entirely where projects do not apply, rather than
+    // offering an empty dropdown.
+    var show = projectsAvailable() && opts.length > 0;
+    el.style.display = show ? '' : 'none';
+    var lab = document.querySelector('label[for="' + elId + '"]');
+    if(lab) lab.style.display = show ? '' : 'none';
+  }
+  function projectsAvailable(){ return currentSpace() === 'family' || currentSpace() === 'farm'; }
+
+  function loadProjects(){
+    if(!projectsAvailable()){ state.projects = []; return Promise.resolve(); }
+    return apiJSON('/rest/v1/fam_projects?select=*&archived=eq.false&order=created_at.desc' + spaceFilter())
+      .then(function(r){ state.projects = r || []; })
+      .catch(function(){ state.projects = []; });
+  }
+  function loadMilestones(){
+    if(!projectsAvailable()){ state.milestones = []; return Promise.resolve(); }
+    return apiJSON('/rest/v1/fam_project_milestones?select=*&order=sort_order')
+      .then(function(r){ state.milestones = r || []; })
+      .catch(function(){ state.milestones = []; });
+  }
+  function milestonesOf(pid){
+    return (state.milestones || []).filter(function(m){ return m.project_id === pid; });
+  }
+  /* Everything tagged to this project across the money tables. Bills and
+     planner items are commitments; expenses are money already gone. */
+  function projectRows(pid){
+    var spent = [], planned = [], incoming = [];
+    (state.expenses || []).forEach(function(e){ if(e.project_id === pid) spent.push(e); });
+    (state.payments || []).forEach(function(p){ if(p.project_id === pid) spent.push(p); });
+    (state.bills || []).forEach(function(b){ if(b.project_id === pid && !b.archived) planned.push(b); });
+    (state.planItems || []).forEach(function(i){ if(i.project_id === pid && !i.paid) planned.push(i); });
+    (state.income || []).forEach(function(i){ if(i.project_id === pid) incoming.push(i); });
+    return {spent:spent, planned:planned, incoming:incoming};
+  }
+  function sumBy(rows, cur){
+    var t = 0;
+    rows.forEach(function(r){ if((r.currency || 'GBP') === cur) t += Number(r.amount) || 0; });
+    return t;
+  }
+  /* Spend against budget, in the project's own currency. Milestone amounts
+     count only when nothing else is tagged, so a milestone used as a rough
+     cost estimate does not double-count a bill raised for the same thing. */
+  function projectTotals(p){
+    var r = projectRows(p.id), cur = p.currency || 'GBP';
+    var spent = sumBy(r.spent, cur);
+    var planned = sumBy(r.planned, cur);
+    var ms = milestonesOf(p.id);
+    var msAmt = 0;
+    ms.forEach(function(m){ if(!m.done && m.amount && (m.currency || cur) === cur) msAmt += Number(m.amount) || 0; });
+    if(!r.planned.length) planned += msAmt;
+    var budget = p.budget == null ? null : Number(p.budget);
+    return {
+      cur: cur, spent: spent, planned: planned, incoming: sumBy(r.incoming, cur),
+      committed: spent + planned, budget: budget,
+      left: budget == null ? null : budget - (spent + planned),
+      pct: (budget == null || budget <= 0) ? null : Math.round(((spent + planned) / budget) * 100),
+      counts: {spent: r.spent.length, planned: r.planned.length, incoming: r.incoming.length},
+      msDone: ms.filter(function(m){ return m.done; }).length, msTotal: ms.length
+    };
+  }
+  var PROJ_STATUS = {active:'Active', on_hold:'On hold', done:'Done', cancelled:'Cancelled'};
+
+  function renderProjects(){
+    var host = $('projects-list'); if(!host) return;
+    var tab = $('tab-projects');
+    if(tab) tab.style.display = projectsAvailable() ? '' : 'none';
+    if(!projectsAvailable()){
+      host.innerHTML = '<div class="empty">Projects are kept in the Family and TRJ Farms spaces.</div>';
+      return;
+    }
+    var f = state.projFilter || 'open';
+    var list = (state.projects || []).filter(function(p){
+      if(f === 'all') return true;
+      var finished = p.status === 'done' || p.status === 'cancelled';
+      return f === 'done' ? finished : !finished;
+    });
+    if(!list.length){
+      host.innerHTML = '<div class="empty">' + (f === 'open'
+        ? 'No open projects. Add one, or push a project across from the GTD console.'
+        : 'Nothing to show.') + '</div>';
+      return;
+    }
+    host.innerHTML = list.map(function(p){
+      var t = projectTotals(p), open = state.openProject === p.id;
+      var over = t.budget != null && t.committed > t.budget;
+      var bar = t.pct == null ? '' :
+        '<div class="pjbar"><span style="width:' + Math.min(100, t.pct) + '%;background:' +
+        (over ? 'var(--red)' : t.pct > 85 ? 'var(--amber)' : 'var(--green)') + '"></span></div>';
+      var lead = p.lead ? memberName(p.lead) : '';
+      return '<div class="pjcard' + (open ? ' open' : '') + '" data-pj="' + esc(p.id) + '">' +
+        '<div class="pjhead" data-act="pjtoggle" data-id="' + esc(p.id) + '">' +
+          '<div><div class="pjname">' + esc(p.name) + '</div>' +
+            '<div class="small muted">' + esc(PROJ_STATUS[p.status] || p.status) +
+              (lead ? ' &middot; ' + esc(lead) : '') +
+              (p.target_date ? ' &middot; target ' + esc(fmtShort(p.target_date)) : '') +
+              (t.msTotal ? ' &middot; ' + t.msDone + '/' + t.msTotal + ' milestones' : '') +
+              (p.gtd_ref ? ' &middot; <span class="pjgtd">GTD</span>' : '') +
+            '</div></div>' +
+          '<div style="text-align:right">' +
+            (t.budget != null
+              ? '<div class="pjfig' + (over ? ' red' : '') + '">' + fmtMoney(t.committed, t.cur) + ' / ' + fmtMoney(t.budget, t.cur) + '</div>'
+              : '<div class="pjfig">' + fmtMoney(t.committed, t.cur) + '</div>') +
+            '<div class="small muted">' + (t.budget != null
+              ? (over ? fmtMoney(t.committed - t.budget, t.cur) + ' over' : fmtMoney(t.left, t.cur) + ' left')
+              : 'no budget set') + '</div>' +
+          '</div>' +
+        '</div>' + bar +
+        (open ? projectDetailHTML(p, t) : '') +
+      '</div>';
+    }).join('');
+  }
+
+  function projectDetailHTML(p, t){
+    var ms = milestonesOf(p.id);
+    var r = projectRows(p.id);
+    var rowLine = function(x, kind){
+      var d = x.due_date || x.on_date || x.week_date || x.paid_at || x.spent_at;
+      return '<div class="pjrow"><span>' + esc(x.name || x.title || x.bill_name || x.person || 'Item') + '</span>' +
+        '<span class="small muted">' + esc(kind) + (d ? ' &middot; ' + esc(fmtShort(String(d).slice(0,10))) : '') + '</span>' +
+        '<span class="mono">' + fmtMoney(Number(x.amount) || 0, x.currency || t.cur) + '</span></div>';
+    };
+    return '<div class="pjbody">' +
+      (p.outcome ? '<p class="small" style="margin:0 0 8px">' + esc(p.outcome) + '</p>' : '') +
+      '<div class="pjgrid">' +
+        '<div><div class="eyebrow">Spent</div><div class="mono">' + fmtMoney(t.spent, t.cur) + '</div><div class="small muted">' + t.counts.spent + ' item' + (t.counts.spent === 1 ? '' : 's') + '</div></div>' +
+        '<div><div class="eyebrow">Still to pay</div><div class="mono">' + fmtMoney(t.planned, t.cur) + '</div><div class="small muted">' + t.counts.planned + ' item' + (t.counts.planned === 1 ? '' : 's') + '</div></div>' +
+        '<div><div class="eyebrow">Money in</div><div class="mono">' + fmtMoney(t.incoming, t.cur) + '</div><div class="small muted">' + t.counts.incoming + ' item' + (t.counts.incoming === 1 ? '' : 's') + '</div></div>' +
+      '</div>' +
+      '<div class="row" style="margin:12px 0 6px"><span class="eyebrow">Milestones</span>' +
+        '<button class="linkbtn" data-act="msadd" data-id="' + esc(p.id) + '">+ Add milestone</button></div>' +
+      (ms.length ? ms.map(function(m){
+        return '<div class="pjrow"><label class="mstick"><input type="checkbox" data-act="mstick" data-id="' + esc(m.id) + '"' + (m.done ? ' checked' : '') + '>' +
+          '<span class="' + (m.done ? 'msdone' : '') + '">' + esc(m.title) + '</span></label>' +
+          '<span class="small muted">' + (m.due_date ? esc(fmtShort(m.due_date)) : '') + '</span>' +
+          '<span class="mono">' + (m.amount ? fmtMoney(Number(m.amount), m.currency || t.cur) : '') +
+          ' <button class="linkbtn" data-act="msedit" data-id="' + esc(m.id) + '">edit</button></span></div>';
+      }).join('') : '<div class="small muted">No milestones yet.</div>') +
+      (r.spent.length || r.planned.length || r.incoming.length
+        ? '<div class="row" style="margin:12px 0 6px"><span class="eyebrow">Money tagged to this project</span></div>' +
+          r.planned.map(function(x){ return rowLine(x, 'due'); }).join('') +
+          r.spent.map(function(x){ return rowLine(x, 'paid'); }).join('') +
+          r.incoming.map(function(x){ return rowLine(x, 'in'); }).join('')
+        : '<div class="small muted" style="margin-top:10px">Nothing tagged yet &mdash; set the project on a bill, planner item, income or expense to track it here.</div>') +
+      '<div class="modal-actions" style="margin-top:12px">' +
+        '<button class="btn" data-act="pjedit" data-id="' + esc(p.id) + '">Edit project</button></div>' +
+    '</div>';
+  }
+
+  function openProjectModal(pj){
+    state.editingProject = pj || null;
+    $('pjm-title').textContent = pj ? 'Edit project' : 'Add project';
+    $('pjm-name').value = pj ? pj.name : '';
+    $('pjm-outcome').value = pj && pj.outcome ? pj.outcome : '';
+    $('pjm-budget').value = pj && pj.budget != null ? pj.budget : '';
+    $('pjm-currency').value = pj ? (pj.currency || 'GBP') : 'GBP';
+    $('pjm-start').value = pj && pj.start_date ? pj.start_date : '';
+    $('pjm-target').value = pj && pj.target_date ? pj.target_date : '';
+    $('pjm-status').value = pj ? pj.status : 'active';
+    $('pjm-notes').value = pj && pj.notes ? pj.notes : '';
+    var lead = $('pjm-lead');
+    lead.innerHTML = '<option value="">&mdash;</option>' + (state.members || []).map(function(m){
+      return '<option value="' + esc(m.user_id) + '">' + esc(memberName(m.user_id)) + '</option>';
+    }).join('');
+    lead.value = pj && pj.lead ? pj.lead : '';
+    var g = $('pjm-gtd');
+    if(pj && pj.gtd_ref){
+      g.style.display = '';
+      g.textContent = 'Linked to a GTD console project. Name, outcome, status and target date sync both ways; budget and milestones live here only.';
+    } else { g.style.display = 'none'; }
+    $('pjm-del').style.display = pj ? '' : 'none';
+    $('pjm-err').style.display = 'none';
+    modalOpen('project-modal');
+  }
+
+  function saveProject(){
+    var name = $('pjm-name').value.trim();
+    var err = $('pjm-err');
+    if(!name){ err.textContent = 'Give the project a name.'; err.style.display = ''; return; }
+    var btn = $('pjm-save'); btn.disabled = true;
+    var body = {
+      name: name,
+      outcome: $('pjm-outcome').value.trim() || null,
+      budget: $('pjm-budget').value === '' ? null : Number($('pjm-budget').value),
+      currency: $('pjm-currency').value,
+      start_date: $('pjm-start').value || null,
+      target_date: $('pjm-target').value || null,
+      status: $('pjm-status').value,
+      lead: $('pjm-lead').value || null,
+      notes: $('pjm-notes').value.trim() || null,
+      updated_at: new Date().toISOString()
+    };
+    var pj = state.editingProject;
+    var req = pj
+      ? api('/rest/v1/fam_projects?id=eq.' + pj.id, {method:'PATCH', body: JSON.stringify(body)})
+      : api('/rest/v1/fam_projects', {method:'POST', body: JSON.stringify(spaceBody(body))});
+    req.then(function(r){ if(!r.ok) return r.text().then(function(t){ throw new Error(t || 'Save failed'); }); })
+      .then(function(){
+        modalClose('project-modal'); toast(pj ? 'Project updated' : 'Project added');
+        return loadProjects().then(renderProjects);
+      })
+      .catch(function(e){ err.textContent = e.message; err.style.display = ''; })
+      .then(function(){ btn.disabled = false; });
+  }
+
+  function deleteProject(){
+    var pj = state.editingProject; if(!pj) return;
+    if(!confirm('Delete "' + pj.name + '"? Money tagged to it stays, but loses the tag.')) return;
+    api('/rest/v1/fam_projects?id=eq.' + pj.id, {method:'DELETE'})
+      .then(function(){
+        modalClose('project-modal'); toast('Project deleted');
+        if(state.openProject === pj.id) state.openProject = null;
+        return Promise.all([loadProjects(), loadMilestones(), loadBills(), loadPlanner(), loadIncomeAll()]).then(renderAll);
+      })
+      .catch(function(e){ toast(e.message); });
+  }
+
+  function openMilestoneModal(ms, pid){
+    state.editingMilestone = ms || null;
+    state.editingMilestoneProject = ms ? ms.project_id : pid;
+    $('msm-title').textContent = ms ? 'Edit milestone' : 'Add milestone';
+    $('msm-title-in').value = ms ? ms.title : '';
+    $('msm-due').value = ms && ms.due_date ? ms.due_date : '';
+    $('msm-amount').value = ms && ms.amount != null ? ms.amount : '';
+    $('msm-del').style.display = ms ? '' : 'none';
+    $('msm-err').style.display = 'none';
+    modalOpen('milestone-modal');
+  }
+
+  function saveMilestone(){
+    var title = $('msm-title-in').value.trim(), err = $('msm-err');
+    if(!title){ err.textContent = 'Give the milestone a title.'; err.style.display = ''; return; }
+    var ms = state.editingMilestone, pid = state.editingMilestoneProject;
+    var pj = (state.projects || []).find(function(x){ return x.id === pid; });
+    var body = {
+      title: title,
+      due_date: $('msm-due').value || null,
+      amount: $('msm-amount').value === '' ? null : Number($('msm-amount').value),
+      currency: pj ? (pj.currency || 'GBP') : 'GBP'
+    };
+    if(!ms){ body.project_id = pid; body.sort_order = milestonesOf(pid).length; }
+    var btn = $('msm-save'); btn.disabled = true;
+    var req = ms
+      ? api('/rest/v1/fam_project_milestones?id=eq.' + ms.id, {method:'PATCH', body: JSON.stringify(body)})
+      : api('/rest/v1/fam_project_milestones', {method:'POST', body: JSON.stringify(body)});
+    req.then(function(r){ if(!r.ok) return r.text().then(function(t){ throw new Error(t || 'Save failed'); }); })
+      .then(function(){
+        modalClose('milestone-modal'); toast(ms ? 'Milestone updated' : 'Milestone added');
+        return loadMilestones().then(renderProjects);
+      })
+      .catch(function(e){ err.textContent = e.message; err.style.display = ''; })
+      .then(function(){ btn.disabled = false; });
+  }
+
+  function deleteMilestone(){
+    var ms = state.editingMilestone; if(!ms) return;
+    api('/rest/v1/fam_project_milestones?id=eq.' + ms.id, {method:'DELETE'})
+      .then(function(){ modalClose('milestone-modal'); toast('Milestone deleted'); return loadMilestones().then(renderProjects); })
+      .catch(function(e){ toast(e.message); });
+  }
+
+  function toggleMilestone(id, done){
+    var body = {done: done, done_at: done ? new Date().toISOString() : null};
+    var m = (state.milestones || []).find(function(x){ return x.id === id; });
+    if(m){ m.done = done; m.done_at = body.done_at; renderProjects(); }   // optimistic
+    api('/rest/v1/fam_project_milestones?id=eq.' + id, {method:'PATCH', body: JSON.stringify(body)})
+      .then(function(r){ if(!r.ok) throw new Error('Could not save'); })
+      .catch(function(e){
+        if(m){ m.done = !done; renderProjects(); }                        // roll back on failure
+        toast(e.message);
+      });
+  }
+
   function renderDebts(){
     var el = $('debts-list');
     var rows = sortRows(state.debts, state.sortDebts);
@@ -4329,7 +4709,7 @@ var App = (function(){
   }
 
   function renderAll(){
-    [['Net worth',renderNetWorth],['Bills',renderBills],['Payments',renderPayments],['Expenses',renderExpenses],['Income',renderIncome],['Budgets',renderBudgets],['Dashboard',renderDashboard],['Planner',renderPlanner]].forEach(function(rp){
+    [['Net worth',renderNetWorth],['Bills',renderBills],['Payments',renderPayments],['Expenses',renderExpenses],['Income',renderIncome],['Budgets',renderBudgets],['Dashboard',renderDashboard],['Planner',renderPlanner],['Projects',renderProjects]].forEach(function(rp){
       try{ rp[1](); }
       catch(e){
         try{ window.__FM_ERRS && window.__FM_ERRS.push(rp[0] + ' render: ' + e.message); }catch(x){}
@@ -4389,6 +4769,7 @@ var App = (function(){
     $('bm-category').value = bill ? (bill.category || '') : '';
     $('bm-responsible').value = bill && bill.responsible ? bill.responsible : '';
     $('bm-account').value = bill && bill.account_id ? bill.account_id : '';
+    fillProjectSelect('bm-project', bill && bill.project_id);
     $('bm-notes').value = bill ? (bill.notes || '') : '';
     $('bm-receipt').value = '';
     $('bm-receipt-current').textContent = bill && bill.receipt_path ? 'A receipt is already attached; choosing a new file replaces it.' : '';
@@ -4414,6 +4795,7 @@ var App = (function(){
         recurrence:$('bm-recurrence').value, category:($('bm-category').value.trim() || 'General'),
         responsible:($('bm-responsible').value || null), notes:($('bm-notes').value.trim() || null),
         account_id:($('bm-account').value || null),
+        project_id:($('bm-project') ? ($('bm-project').value || null) : null),
         receipt_path: receiptPath || null, updated_at: new Date().toISOString()
       };
       if(state.editingBill){
@@ -4545,6 +4927,24 @@ var App = (function(){
       var b = e.target.closest('button[data-view]'); if(b) setView(b.getAttribute('data-view'));
     });
     $('bill-add-btn').addEventListener('click', function(){ openBillModal(null); });
+    $('proj-add-btn').addEventListener('click', function(){ openProjectModal(null); });
+    $('pjm-save').addEventListener('click', saveProject);
+    $('pjm-del').addEventListener('click', deleteProject);
+    $('msm-save').addEventListener('click', saveMilestone);
+    $('msm-del').addEventListener('click', deleteMilestone);
+    $('proj-filter').addEventListener('change', function(){ state.projFilter = this.value; renderProjects(); });
+    $('projects-list').addEventListener('click', function(e){
+      var b = e.target.closest('[data-act]'); if(!b) return;
+      var act = b.getAttribute('data-act'), id = b.getAttribute('data-id');
+      if(act === 'pjtoggle'){ state.openProject = state.openProject === id ? null : id; renderProjects(); return; }
+      if(act === 'pjedit'){ openProjectModal((state.projects||[]).find(function(x){ return x.id === id; })); return; }
+      if(act === 'msadd'){ openMilestoneModal(null, id); return; }
+      if(act === 'msedit'){ openMilestoneModal((state.milestones||[]).find(function(x){ return x.id === id; })); return; }
+    });
+    $('projects-list').addEventListener('change', function(e){
+      var c = e.target.closest('[data-act="mstick"]'); if(!c) return;
+      toggleMilestone(c.getAttribute('data-id'), c.checked);
+    });
     $('bm-save').addEventListener('click', saveBill);
     $('pm-save').addEventListener('click', confirmPaid);
     $('rm-save').addEventListener('click', confirmReceived);
@@ -4985,7 +5385,8 @@ var App = (function(){
           safe(loadBills,'Bills'), safe(loadPayments,'Payments'), safe(loadExpenses,'Expenses'),
           safe(loadPlanner,'Planner'), safe(loadAccounts,'Accounts'), safe(loadDebts,'Debts'),
           safe(loadDebtPayments,'Debt payments'), safe(loadBudgets,'Budgets'), safe(loadSnapshots,'Snapshots'),
-          safe(loadSettings,'Settings'), safe(loadAssets,'Assets'), safe(loadIncomeAll,'Income')
+          safe(loadSettings,'Settings'), safe(loadAssets,'Assets'), safe(loadIncomeAll,'Income'),
+          safe(loadProjects,'Projects'), safe(loadMilestones,'Milestones')
         ]).then(function(){ return takeSnapshots().catch(function(e){ failures.push('Snapshot: ' + (e.message||'failed')); }); })
           .then(function(){
             renderAll();
@@ -5030,7 +5431,7 @@ var App = (function(){
     approxUSD:approxUSD, signIn:signIn, signOut:signOut, api:api, apiJSON:apiJSON,
     loadSession:loadSession, saveSession:saveSession,
     state:state, init:init, boot:boot, todayISO:todayISO,
-    renderAll:renderAll, fridayOf:fridayOf, weeksOfMonth:weeksOfMonth, weeksWindow:weeksWindow, currentFriday:currentFriday, addWeeksISO:addWeeksISO, weekTotals:weekTotals, shiftMonth:shiftMonth,
+    renderAll:renderAll, renderProjects:renderProjects, projectTotals:projectTotals, projectRows:projectRows, milestonesOf:milestonesOf, projectsAvailable:projectsAvailable, fridayOf:fridayOf, weeksOfMonth:weeksOfMonth, weeksWindow:weeksWindow, currentFriday:currentFriday, addWeeksISO:addWeeksISO, weekTotals:weekTotals, shiftMonth:shiftMonth,
     moveCard:moveCard, mapCaptureResponse:mapCaptureResponse, renderPlanner:renderPlanner,
     accountBalance:accountBalance, payoffProjection:payoffProjection, payoffPlan:payoffPlan, renderPayback:renderPayback, fillPaybackSelect:fillPaybackSelect,
     periodsUntil:periodsUntil, requiredPayment:requiredPayment, renderPaybackDate:renderPaybackDate, setPaybackMode:setPaybackMode, monthlyClose:monthlyClose,

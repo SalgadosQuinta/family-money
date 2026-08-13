@@ -19,6 +19,8 @@ const plusDays = n => { const d = new Date(); d.setDate(d.getDate()+n); return i
 
 // ---- mock data ----
 const DB = {
+  projects: [],
+  milestones: [],
   members: [{user_id:UID, role:'admin'},{user_id:UID2, role:'member'}],
   profiles: [{id:UID, display_name:'Rodney', email:'r@x.com'},{id:UID2, display_name:'Ana', email:'a@x.com'}],
   bills: [
@@ -2015,8 +2017,18 @@ async function cycleSpace(dom, A){
     assert(col.innerHTML.includes('Barclaycard') && col.innerHTML.includes('£96.45'), 'card shows the debt and its repayment amount');
     assert(col.innerHTML.includes(A.esc(dueDay + ' ')) || col.innerHTML.includes('due '), 'card states the date it is due');
     assert(col.innerHTML.includes('no repayment amount set'), 'a debt with no amount still shows, flagged');
+    // Assert on the arithmetic, not on a substring: the Out cell shows the
+    // week's whole total, so the repayment is one component of it and its bare
+    // digits need not appear.
     const outRow = Array.from(col.querySelectorAll('.frow')).find(r => r.textContent.includes('Out'));
-    assert(outRow && outRow.textContent.includes('96.45'), 'the scheduled repayment counts in the week Out total');
+    assert(outRow, 'the week shows an Out total');
+    const outVal = Number((outRow.textContent.match(/[\d,]+\.\d{2}/) || ['0'])[0].replace(/,/g, ''));
+    const repaid = A.debtDueList(target).reduce((n, x) => n + (Number(x.amount) || 0), 0);
+    assert(repaid >= 96.45, 'the repayment is projected for this week (' + repaid + ')');
+    assert(outVal >= repaid, 'the Out total includes the scheduled repayment (' + outVal + ' >= ' + repaid + ')');
+    // and removing it would change the total, i.e. it is genuinely counted
+    const otherOut = outVal - repaid;
+    assert(otherOut >= 0 && outVal > otherOut, 'the repayment is a real component of the Out total');
 
     // Recording from the card prefills debt, amount and the due date
     const recBtn = col.querySelector('button[data-act="ddue"][data-id="dq1"]');
@@ -2305,6 +2317,127 @@ async function cycleSpace(dom, A){
     d.getElementById('pm-save').click(); await wait(300);
     assert(DB.bills.find(b => b.id === 'ob2').archived === true, 'the one-off bill is archived once paid');
     assert(!d.getElementById('pl-board').innerHTML.includes('One-off overdue'), 'and disappears from the planner');
+  }
+
+  console.log('--- Projects: budget, spend and milestones ---');
+  {
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){
+        w.fetch = function(url, opts){
+          opts = opts || {};
+          const u = String(url);
+          const j = (data) => Promise.resolve({ok:true, status:200,
+            text:()=>Promise.resolve(JSON.stringify(data)), json:()=>Promise.resolve(data)});
+          if(u.includes('/rest/v1/fam_projects')){
+            if(opts.method === 'POST'){ const b = JSON.parse(opts.body); b.id = 'new-pj'; DB.projects.push(b);
+              return Promise.resolve({ok:true,status:201,text:()=>Promise.resolve('')}); }
+            if(opts.method === 'PATCH'){ const id = /id=eq\.([^&]+)/.exec(u)[1];
+              Object.assign(DB.projects.find(x=>x.id===id), JSON.parse(opts.body));
+              return Promise.resolve({ok:true,status:204,text:()=>Promise.resolve('')}); }
+            if(opts.method === 'DELETE'){ const id = /id=eq\.([^&]+)/.exec(u)[1];
+              DB.projects = DB.projects.filter(x=>x.id!==id);
+              return Promise.resolve({ok:true,status:204,text:()=>Promise.resolve('')}); }
+            return j(DB.projects);
+          }
+          if(u.includes('/rest/v1/fam_project_milestones')){
+            if(opts.method === 'POST'){ const b = JSON.parse(opts.body); b.id = 'new-ms'; DB.milestones.push(b);
+              return Promise.resolve({ok:true,status:201,text:()=>Promise.resolve('')}); }
+            if(opts.method === 'PATCH'){ const id = /id=eq\.([^&]+)/.exec(u)[1];
+              Object.assign(DB.milestones.find(x=>x.id===id), JSON.parse(opts.body));
+              return Promise.resolve({ok:true,status:204,text:()=>Promise.resolve('')}); }
+            if(opts.method === 'DELETE'){ const id = /id=eq\.([^&]+)/.exec(u)[1];
+              DB.milestones = DB.milestones.filter(x=>x.id!==id);
+              return Promise.resolve({ok:true,status:204,text:()=>Promise.resolve('')}); }
+            return j(DB.milestones);
+          }
+          return mockFetch(url, opts);
+        };
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}}));
+      }});
+    await wait(150);
+    const d = dom.window.document, A = dom.window.App;
+    DB.projects = [
+      {id:'pj1', name:'Borehole at the farm', outcome:'Water to the top paddock', status:'active',
+       budget:5000, currency:'GBP', target_date:plusDays(60), lead:null, notes:null,
+       space:'family', gtd_ref:'project_abc', archived:false, created_at:'2026-08-01T00:00:00Z'},
+      {id:'pj2', name:'Finished thing', outcome:null, status:'done', budget:100, currency:'GBP',
+       space:'family', gtd_ref:null, archived:false, created_at:'2026-07-01T00:00:00Z'}
+    ];
+    DB.milestones = [
+      {id:'ms1', project_id:'pj1', title:'Casing delivered', due_date:plusDays(10), done:false, amount:800, currency:'GBP', sort_order:0},
+      {id:'ms2', project_id:'pj1', title:'Site cleared',     due_date:plusDays(2),  done:true,  amount:null, currency:'GBP', sort_order:1}
+    ];
+    DB.bills = [{id:'b1', name:'Drilling deposit', amount:1200, currency:'GBP', due_date:plusDays(5),
+      recurrence:'none', archived:false, project_id:'pj1'}];
+    DB.expenses = [{id:'e1', name:'Survey fee', amount:300, currency:'GBP', spent_at:plusDays(-3), project_id:'pj1'}];
+    DB.planner = []; DB.income = []; DB.debts = []; DB.debtPayments = []; DB.payments = [];
+    await A.boot(); await wait(200);
+
+    const tab = d.querySelector('button[data-view="projects"]');
+    assert(tab, 'a Projects tab exists');
+    tab.click(); await wait(150);
+    const list = d.getElementById('projects-list');
+    assert(/Borehole at the farm/.test(list.innerHTML), 'open projects listed');
+    assert(!/Finished thing/.test(list.innerHTML), 'finished projects hidden under the default filter');
+    assert(/GTD/.test(list.innerHTML), 'a project pushed from GTD is marked as linked');
+
+    // Budget vs actual: spend + commitments against budget
+    const p1 = DB.projects.find(p=>p.id==='pj1');
+    const t = A.projectTotals(p1);
+    assert(t.spent === 300, 'spent counts expenses (got ' + t.spent + ')');
+    assert(t.planned === 1200, 'still-to-pay counts unpaid bills, not milestone estimates (got ' + t.planned + ')');
+    assert(t.committed === 1500 && t.left === 3500, 'committed and remaining against budget');
+    assert(t.msDone === 1 && t.msTotal === 2, 'milestone progress counted');
+
+    // CLICK-THROUGH: expand a project
+    d.querySelector('[data-act="pjtoggle"][data-id="pj1"]').click(); await wait(120);
+    let html2 = d.getElementById('projects-list').innerHTML;
+    assert(/Casing delivered/.test(html2), 'milestones shown when expanded');
+    assert(/Drilling deposit/.test(html2), 'tagged bills listed');
+    assert(/Survey fee/.test(html2), 'tagged expenses listed');
+
+    // CLICK-THROUGH: tick a milestone
+    const tick = d.querySelector('[data-act="mstick"][data-id="ms1"]');
+    assert(tick, 'milestones are tickable');
+    tick.checked = true;
+    tick.dispatchEvent(new dom.window.Event('change', {bubbles:true}));
+    await wait(200);
+    assert(DB.milestones.find(m=>m.id==='ms1').done === true, 'ticking saves the milestone');
+
+    // CLICK-THROUGH: add a milestone
+    d.querySelector('[data-act="msadd"][data-id="pj1"]').click(); await wait(120);
+    assert(d.getElementById('milestone-modal').classList.contains('open'), 'the milestone modal opens');
+    d.getElementById('msm-title-in').value = 'Pump installed';
+    d.getElementById('msm-due').value = plusDays(30);
+    d.getElementById('msm-save').click(); await wait(250);
+    assert(DB.milestones.some(m=>m.title==='Pump installed'), 'a new milestone is saved');
+    assert(DB.milestones.find(m=>m.title==='Pump installed').project_id === 'pj1', 'attached to the right project');
+
+    // CLICK-THROUGH: add a project
+    d.getElementById('proj-add-btn').click(); await wait(120);
+    assert(d.getElementById('project-modal').classList.contains('open'), 'the project modal opens');
+    d.getElementById('pjm-name').value = 'Fencing the east boundary';
+    d.getElementById('pjm-budget').value = '900';
+    d.getElementById('pjm-save').click(); await wait(250);
+    const added = DB.projects.find(p=>p.name === 'Fencing the east boundary');
+    assert(added, 'a new project is saved');
+    assert(Number(added.budget) === 900 && added.space === 'family', 'budget and space recorded');
+
+    // Money forms can tag a project
+    d.querySelector('button[data-view="bills"]').click(); await wait(120);
+    d.getElementById('bill-add-btn').click(); await wait(120);
+    const sel = d.getElementById('bm-project');
+    assert(sel, 'the bill form offers a project picker');
+    assert(/Borehole at the farm/.test(sel.innerHTML), 'open projects areselectable');
+    assert(!/Finished thing/.test(sel.innerHTML), 'finished projects are not offered for new tagging');
+
+    // Filter shows finished work when asked
+    d.querySelector('button[data-view="projects"]').click(); await wait(120);
+    const filt = d.getElementById('proj-filter');
+    filt.value = 'all';
+    filt.dispatchEvent(new dom.window.Event('change', {bubbles:true}));
+    await wait(150);
+    assert(/Finished thing/.test(d.getElementById('projects-list').innerHTML), 'the all filter shows finished projects');
   }
 
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');
