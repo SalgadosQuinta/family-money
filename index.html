@@ -269,12 +269,27 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
       '<button id="fm-stuck-copy" style="background:none;color:#a8a49c;border:1px solid #33312d;border-radius:8px;padding:11px 16px;font-size:15px;cursor:pointer">Copy diagnostics</button>' +
       '<p id="fm-stuck-diag" style="color:#6f6b64;font-size:11.5px;font-family:ui-monospace,monospace;margin-top:18px;word-break:break-all;white-space:pre-wrap"></p></div>';
     document.body.appendChild(d);
+    // Report enough to diagnose without a second round trip. "js-errors none"
+    // alone proved useless once: it covers render faults but not a caught
+    // rejection, a stalled request, or a section that painted with no height.
+    var sections = [];
+    try{
+      document.querySelectorAll('main section').forEach(function(sec){
+        if(sec.style.display !== 'none')
+          sections.push(sec.id.replace('view-','') + ':' + sec.offsetHeight + 'px/' + sec.innerHTML.length + 'ch');
+      });
+    }catch(e){}
     var lines = ['phase ' + phase,
       'build ' + (window.APP_BUILD_PUBLIC || 'unknown'),
       navigator.onLine ? 'online' : 'OFFLINE',
       'sw ' + (navigator.serviceWorker && navigator.serviceWorker.controller ? 'controlling' : 'none'),
       'stage ' + (window.__FM_STAGE || 'pre-init'),
-      'js-errors ' + (window.__FM_ERRS.length ? window.__FM_ERRS.slice(0,4).join(' \u00b7\u00b7 ') : 'none')];
+      'js-errors ' + (window.__FM_ERRS.length ? window.__FM_ERRS.slice(0,4).join(' \u00b7\u00b7 ') : 'none'),
+      'last-error ' + (window.__FM_LAST_ERROR || 'none'),
+      'visible ' + (sections.length ? sections.join(' \u00b7 ') : 'NO VISIBLE SECTION'),
+      'view ' + (localStorage.getItem('fm_view') || '?') + ' \u00b7 space ' + (localStorage.getItem('fm_space') || '?') +
+        ' \u00b7 plmode ' + (localStorage.getItem('fm_plmode') || '?'),
+      'boot ' + (window.__FM_BOOT_STEP || 'unknown')];
     var diagEl = d.querySelector('#fm-stuck-diag');
     diagEl.textContent = lines.join('\n');
     // In-page probe to the data host: if this fails while the site loads,
@@ -283,7 +298,12 @@ img.receipt{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
       var ctrl = window.AbortController ? new AbortController() : null;
       if(ctrl) setTimeout(function(){ ctrl.abort(); }, 4000);
       fetch('https://ejlsbydsqjbxfwmvlapm.supabase.co/auth/v1/health', {signal: ctrl ? ctrl.signal : undefined})
-        .then(function(r){ diagEl.textContent += '\ndata-host probe: HTTP ' + r.status; })
+        .then(function(r){
+          // 401 here is the expected answer without an API key: it proves the
+          // host is reachable. Saying so stops a healthy network reading as a fault.
+          var ok = (r.status === 200 || r.status === 401);
+          diagEl.textContent += '\ndata-host probe: HTTP ' + r.status + (ok ? ' (reachable \u2014 network is fine)' : ' (unexpected)');
+        })
         .catch(function(e){ diagEl.textContent += '\ndata-host probe: BLOCKED (' + (e && e.name) + ') \u2014 an extension or network filter in this browser profile is stopping the app\u2019s data requests. Try disabling extensions for this site.'; });
     }catch(e){}
     d.querySelector('#fm-stuck-fix').onclick = function(){ wipe(true).then(function(){ location.reload(); }); };
@@ -1668,16 +1688,23 @@ var App = (function(){
     // Single-flight: concurrent 401s share one refresh. Refresh tokens rotate on
     // use, so parallel refreshes make the later ones fail as token reuse.
     if(refreshToken._inflight) return refreshToken._inflight;
+    var rctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var rtimer = rctrl ? setTimeout(function(){ rctrl.abort(); }, 8000) : null;
     var p = fetch(SUPABASE_URL + '/auth/v1/token?grant_type=refresh_token', {
       method:'POST',
       headers:{'apikey':ANON_KEY,'Content-Type':'application/json'},
-      body: JSON.stringify({refresh_token: state.session.refresh_token})
+      body: JSON.stringify({refresh_token: state.session.refresh_token}),
+      signal: rctrl ? rctrl.signal : undefined
     }).then(function(r){
+      if(rtimer) clearTimeout(rtimer);
       if(!r.ok){ var e = new Error('Refresh failed'); e.authDead = (r.status === 400 || r.status === 401); throw e; }
       return r.json();
     }).then(function(j){
       saveSession({access_token:j.access_token, refresh_token:j.refresh_token, user:j.user});
       return state.session;
+    }).catch(function(e){
+      if(rtimer) clearTimeout(rtimer);
+      throw e;   // aborted refresh must reject, never hang its waiters
     });
     refreshToken._inflight = p.then(function(v){ refreshToken._inflight = null; return v; },
       function(e){ refreshToken._inflight = null; throw e; });
@@ -1738,7 +1765,7 @@ var App = (function(){
     });
   }
 
-  var APP_BUILD = 'v68';
+  var APP_BUILD = 'v69';
   try{ window.APP_BUILD_PUBLIC = APP_BUILD; }catch(e){}
   /* ---------------- offline layer ----------------
      Reads: every successful GET is cached in localStorage; when the network
@@ -5368,7 +5395,20 @@ var App = (function(){
     });
   }
 
+  /* Never let a network call that simply never settles hold up the boot chain.
+     A rejection was always handled; a stall was not, and a stall leaves the
+     screen blank with nothing logged — which is exactly what it looked like. */
+  function withDeadline(promise, ms, label){
+    return new Promise(function(resolve){
+      var done = false;
+      var finish = function(v){ if(!done){ done = true; resolve(v); } };
+      var t = setTimeout(function(){ finish({timedOut:true, label:label}); }, ms || 10000);
+      Promise.resolve(promise).then(function(v){ clearTimeout(t); finish(v); },
+                                    function(e){ clearTimeout(t); finish({error:e, label:label}); });
+    });
+  }
   function boot(){
+    window.__FM_BOOT_STEP = 'start';
     showApp();
     if(currentSpace() === 'private'){
       // Hold at the lock; fall back to family so nothing gated renders behind it
@@ -5383,9 +5423,15 @@ var App = (function(){
     if(outbox().length && navigator.onLine) outboxReplay().then(function(){ if(!outbox().length) toast('Offline changes synced.'); });
     // Membership decides the gate on its own; other loaders may fail without
     // holding the banner up.
-    return loadMembers()
-      .then(function(){ showApp(); return Promise.all([loadRates(), loadGrants(), loadNotifyPrefs()]).catch(function(e){ toast('Some data failed to load: ' + e.message); }); })
+    return withDeadline(loadMembers(), 12000, 'members')
       .then(function(){
+        window.__FM_BOOT_STEP = 'members-done';
+        showApp();
+        // Deadlined: none of these three may hold up the first paint.
+        return withDeadline(Promise.all([loadRates(), loadGrants(), loadNotifyPrefs()]), 10000, 'prefs');
+      })
+      .then(function(){
+        window.__FM_BOOT_STEP = 'prefs-done';
         showApp(); // re-check membership banner
         setSpace(currentSpace()); // repopulate space options now roles/grants are known
         if(!state.isMember){ setView('dashboard'); return; }
@@ -5394,7 +5440,27 @@ var App = (function(){
         // that fails is named in a persistent banner instead of silently
         // blanking the whole app.
         var failures = [];
-        var safe = function(fn, label){ return fn().catch(function(e){ failures.push(label + ': ' + (e.message || 'failed')); }); };
+        window.__FM_BOOT_STEP = 'loaders-start';
+        if(!state.isMember) return;
+        // Paint immediately from whatever is already in state/cache. The first
+        // paint must never depend on the network: previously renderAll() ran
+        // only after all fourteen loaders settled, so one request that stalled
+        // (rather than failed) left the screen blank with nothing logged.
+        try{ renderAll(); }catch(e){}
+        // Deadline per loader. Rejections were already caught, but a request
+        // that never settles used to stall Promise.all and leave the screen
+        // blank with no error to show for it. Nothing may hold up the paint.
+        var safe = function(fn, label){
+          return new Promise(function(resolve){
+            var done = false;
+            var finish = function(msg){ if(done) return; done = true; if(msg) failures.push(msg); resolve(); };
+            var t = setTimeout(function(){ finish(label + ': timed out'); }, 12000);
+            try{
+              fn().then(function(){ clearTimeout(t); finish(); },
+                        function(e){ clearTimeout(t); finish(label + ': ' + (e && e.message || 'failed')); });
+            }catch(e){ clearTimeout(t); finish(label + ': ' + (e && e.message || 'failed')); }
+          });
+        };
         return Promise.all([
           safe(loadBills,'Bills'), safe(loadPayments,'Payments'), safe(loadExpenses,'Expenses'),
           safe(loadPlanner,'Planner'), safe(loadAccounts,'Accounts'), safe(loadDebts,'Debts'),
@@ -5403,7 +5469,9 @@ var App = (function(){
           safe(loadProjects,'Projects'), safe(loadMilestones,'Milestones')
         ]).then(function(){ return takeSnapshots().catch(function(e){ failures.push('Snapshot: ' + (e.message||'failed')); }); })
           .then(function(){
+            window.__FM_BOOT_STEP = 'loaders-done';
             renderAll();
+            window.__FM_BOOT_STEP = 'rendered';
             if(currentSpace() === 'family') runDueChecks();
             showLoadFailures(failures);
             renderDiagFooter();

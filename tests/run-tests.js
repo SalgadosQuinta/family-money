@@ -2518,6 +2518,47 @@ async function cycleSpace(dom, A){
     assert(/Finished thing/.test(d.getElementById('projects-list').innerHTML), 'the all filter shows finished projects');
   }
 
+  console.log('--- Boot resilience: nothing may gate the first paint ---');
+  {
+    // Worst case: every data request hangs rather than fails. A rejection was
+    // always handled; a request that never settles was not.
+    const dom = new JSDOM(html, {runScripts:'dangerously', url:'https://example.test/',
+      beforeParse(w){
+        w.fetch = (u) => {
+          if(String(u).includes('fam_members')) return Promise.resolve({ok:true,status:200,
+            text:()=>Promise.resolve(JSON.stringify([{user_id:UID, role:'admin'}])),
+            json:()=>Promise.resolve([{user_id:UID, role:'admin'}])});
+          return new Promise(()=>{});   // hangs forever
+        };
+        w.localStorage.setItem('fm_session', JSON.stringify({access_token:'AT1', refresh_token:'RT1', user:{id:UID, email:'r@x.com'}}));
+      }});
+    await wait(900);
+    const d = dom.window.document;
+    const dash = d.getElementById('view-dashboard');
+    assert(dash.innerHTML.trim().length > 200,
+      'the dashboard paints even while every request is hanging (' + dash.innerHTML.trim().length + ' chars)');
+    assert(typeof dom.window.__FM_BOOT_STEP === 'string' && dom.window.__FM_BOOT_STEP.length > 0,
+      'boot progress is recorded so a stall is identifiable (' + dom.window.__FM_BOOT_STEP + ')');
+    assert(dom.window.__FM_BOOT_STEP !== 'rendered',
+      'and correctly shows boot did NOT complete while requests hang');
+  }
+
+  console.log('--- Diagnostics report enough to act on ---');
+  {
+    const src = html;
+    assert(src.includes('last-error '), 'the stuck panel reports the last runtime error');
+    assert(src.includes('NO VISIBLE SECTION'), 'it distinguishes "no section shown" from "shown but empty"');
+    assert(/visible.*offsetHeight|offsetHeight.*px/.test(src), 'it reports section heights, which is what the blank check measures');
+    assert(src.includes('fm_plmode'), 'persisted UI modes are reported — they are boot inputs');
+    assert(src.includes('__FM_BOOT_STEP'), 'how far boot got is reported');
+    assert(src.includes('reachable \\u2014 network is fine') || src.includes('reachable'),
+      'a 401 from the health probe is labelled reachable, not reported as a bare fault');
+    // The refresh call must have a deadline like every other network call
+    const refresh = src.slice(src.indexOf('function refreshToken'), src.indexOf('// fetch wrapper with refresh-on-401'));
+    assert(/AbortController/.test(refresh) && /setTimeout/.test(refresh),
+      'the token refresh has a deadline; every loader hitting 401 waits on it');
+  }
+
   console.log('\\n' + passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

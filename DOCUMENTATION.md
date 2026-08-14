@@ -280,3 +280,43 @@ instead, which runs whenever the project list changes.
 project's own currency; a USD expense on a GBP project is not added at face
 value. Covered by a regression test — silently mixing currencies would be a
 plausible and expensive mistake.
+
+## Blank screen: a stalled request could gate the first paint (v69)
+
+Reported on v68: "The app did not finish loading", `stage app-shown`,
+`js-errors none`, `data-host probe: HTTP 401`.
+
+**The 401 was a red herring.** `/auth/v1/health` answers 401 without an API key,
+so it proves the host is *reachable*. The panel reported the bare status, which
+made a healthy network look like the fault. It now says "reachable".
+
+**The real structural fault.** The boot chain was:
+
+    loadMembers() -> Promise.all([loadRates, loadGrants, loadNotifyPrefs])
+                  -> setView() -> Promise.all([14 loaders]) -> renderAll()
+
+Every stage handled *rejection*. None handled a request that simply **never
+settles**. One stalled connection and the chain stopped: the app shell was
+shown, no error was ever thrown, and nothing painted — matching the report
+exactly. `js-errors none` was true and useless.
+
+Fixes:
+1. `withDeadline()` wraps each boot stage; nothing may hold up the paint.
+2. `safe()` gives every one of the fourteen loaders its own 12s deadline, and
+   names any that time out in the failure banner.
+3. `renderAll()` is called **before** the loaders, painting from cache
+   immediately, so the first paint never depends on the network at all.
+4. `refreshToken()` gains an 8s abort — it was the only fetch in the app with
+   no deadline, and every loader hitting a 401 waits on that one shared promise.
+
+**Diagnostics now report enough to act on**: last runtime error, each visible
+section's height and content length (the blank check measures height, so
+"shown but zero-height" and "not shown" are different faults), the persisted
+view/space/plmode (boot inputs), and `__FM_BOOT_STEP` — which stage the chain
+reached. Verified: everything-hangs stops at `start`, prefs-hang at
+`members-done`, healthy boot reaches `rendered`.
+
+**Honest note:** the original blank was not reproduced. jsdom reports every
+`offsetHeight` as 0, so the watchdog's `offsetHeight > 40` test cannot be
+exercised there. The fixes above remove the whole class of stall-induced
+blanks and make a recurrence self-describing.
